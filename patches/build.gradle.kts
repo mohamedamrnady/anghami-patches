@@ -1,14 +1,15 @@
-group = "app.template"
+group = "app.anghami"
 
 patches {
-    // TODO: Update this section with your project details.
+    // Anghami 8.0.28 local-Plus research patches (local gates only;
+    // server premium checks remain). See README.md.
     about {
-        name = "UserXYZ Patches"
-        description = "Patches for apps I like"
-        source = "git@github.com:UserXYZ/morphe-patches.git"
-        author = "Awesome dev"
-        contact = "na"
-        website = "na"
+        name = "Anghami patches by Nady"
+        description = "Local Plus/restriction/ad-removal patches for Anghami 8.0.28 (local gates only; server premium checks remain)."
+        source = "https://github.com/mohamedamrnady/anghami-patches"
+        author = "Nady"
+        contact = "https://github.com/mohamedamrnady/anghami-patches/issues"
+        website = "https://github.com/mohamedamrnady/anghami-patches"
         license = "GPLv3"
     }
 }
