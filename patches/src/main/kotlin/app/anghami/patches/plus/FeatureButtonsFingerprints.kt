@@ -18,13 +18,13 @@ import app.morphe.patcher.methodCall
  * - Player AI MIX switch + label: U0() shows G0/H0 only when the queue is
  *   automix-eligible AND `Account.showMixAIButtonPlayer` is true; the
  *   single iget is swapped to const/4 so the branch falls to GONE.
- * - Playlist AI MIX button: AutomixButtonModel is added unconditionally
- *   by the A4/a section factory (no client gate; server sends the
- *   section), so it is dropped gap-free in the S8/i adapter funnel (no
- *   model = no cell = no gap). Its feed-pipeline occurrence is dropped by
- *   the "Hide upgrade upsell" patch's shouldInclude filter (single-prepend
- *   constraint — see HideUpsellPatch kdoc NOTE 3). A4/a itself is
- *   untouched (switch payloads break under edit).
+ * - Playlist AI MIX button: the client creates the automix_button section
+ *   itself in Q.l(songSections), gated on the server flag
+ *   Account.showMixAIButtonPlaylist() (sole reader; call sites are the P5/h
+ *   playlist data path and k5/g feed sections). Forcing the flag false
+ *   means the section is never created — no model, no gap, Epoxy-safe.
+ *   Deliberately NOT removed in the S8/i Epoxy adapter funnel (model
+ *   list-surgery at submit raced layout and crashed P5/b on 2026-09-28).
  */
 
 object KaraokeUpsellButtonFingerprint : Fingerprint(
@@ -55,16 +55,19 @@ object PlayerAutomixSwitchFingerprint : Fingerprint(
     )
 )
 
-object AdapterSetModelsFingerprint : Fingerprint(
-    definingClass = "LS8/i;",
-    name = "e",
-    // NOTE: no accessFlags; single e(List)V def. The M9/c.o call pins it.
-    returnType = "V",
-    parameters = listOf("Ljava/util/List;"),
+object MixAIButtonPlaylistFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/ghost/local/Account;",
+    name = "showMixAIButtonPlaylist",
+    // NOTE: no accessFlags; class + name + signature pin it. The body does
+    // NOT read the field directly (it delegates via getBooleanAttribute +
+    // a shared C2/d callable), so filter on that call instead — a field
+    // filter matches nothing here and the hook silently lands nowhere.
+    returnType = "Z",
+    parameters = listOf(),
     filters = listOf(
         methodCall(
-            definingClass = "LM9/c;",
-            name = "o",
+            definingClass = "Lcom/anghami/ghost/local/Account;",
+            name = "getBooleanAttribute",
         ),
     )
 )
