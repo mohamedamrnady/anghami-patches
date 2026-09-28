@@ -17,7 +17,7 @@ Click here to add these patches to Morphe: https://morphe.software/add-source?gi
 
 Then in Morphe Manager (Expert Mode): pick the stock `the-stock-apk` + matching
 `arm64_v8a` + dpi splits (or a merged APK), select the patches below, and install.
-All patches are opt-in (`default=false`) — enable only what you need.
+All patches are enabled by default (`default=true`) — disable any you don't need.
 
 ## 🩹 Patches list
 
