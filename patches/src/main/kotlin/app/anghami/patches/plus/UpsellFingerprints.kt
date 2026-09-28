@@ -159,6 +159,34 @@ object GetSettingsQuestionFingerprint : Fingerprint(
 )
 
 /**
+ * Library purple Plus card source ("2 months for EGP 69.99").
+ *
+ * The Library playlists screen (S5/o, Epoxy controller) does NOT go through
+ * the A4/a section factory or list_fragment/e.shouldInclude: S5/n copies the
+ * server LibraryConfiguration.button into S5/o.h, and S5/o.flatten()
+ * unconditionally wraps it in a ButtonModel (null-checked: no button = no
+ * model). The _bind GONE hook therefore left an empty RecyclerView cell
+ * (the reported gap), and the shouldInclude filter never runs here
+ * (filterModels is search-only in _flatten). Nulling this getter prevents
+ * the model from ever being created — gap-free by construction — and
+ * flatten() falls back to its own no-button layout (16dp spacing via
+ * LibraryFilterData). Sole caller is S5/n (verified in 8.0.28 smali);
+ * ButtonModel.getButton (different class) is untouched.
+ */
+object LibraryPromoButtonFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/ghost/api/response/LibraryConfigurationAPIResponse\$LibraryConfiguration;",
+    name = "getButton",
+    // NOTE: no accessFlags — 8.0.28 declares this `public final` and
+    // exact-int flag matching proved brittle elsewhere. Class + name +
+    // signature already pin it (single occurrence on this class).
+    returnType = "Lcom/anghami/ghost/pojo/APIButton;",
+    parameters = listOf(),
+    filters = listOf(
+        opcode(Opcode.RETURN_OBJECT),
+    )
+)
+
+/**
  * Feed pipeline filter (list_fragment/e). `_flatten()` always runs
  * filterModels() -> shouldInclude(model, filterString) per model; false
  * removes it via Iterator.remove(). Hooked to also exclude upsell cards so

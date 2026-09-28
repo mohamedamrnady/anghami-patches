@@ -38,6 +38,10 @@ import app.anghami.patches.shared.Constants.COMPATIBILITY_ANGHAMI_8_0_28
  *   = null (the actual banner source: server Question JSON rendered as
  *   QuestionRow) plus getUpgradeModel() = null (defense-in-depth for the
  *   subscriptions sub-screen) so the row builders skip.
+ * - Library promo card ("2 months for EGP 69.99"): forces
+ *   LibraryConfiguration.getButton() = null so S5/o.flatten() never creates
+ *   the ButtonModel — no model = no cell = no gap (the _bind GONE hook
+ *   alone left an empty RecyclerView cell here).
  *
  * Deliberately NOT hooked (crash, 2026-09-25, logcat NPE in
  * BlueBarItem.getItem <- NavigationActivity): BlueBarItem.fillMemCache.
@@ -134,6 +138,20 @@ val hideUpsellPatch = bytecodePatch(
             """
         )
         GetSettingsQuestionFingerprint.method.addInstructions(
+            0,
+            """
+                const/4 v0, 0x0
+                return-object v0
+            """
+        )
+        // Library gap fix: the Library playlists screen (S5/o.flatten)
+        // builds its promo ButtonModel directly from S5/o.h (server
+        // LibraryConfiguration.button), bypassing the A4/a factory and the
+        // shouldInclude filter (search-only). GONE-ing at bind time left an
+        // empty RecyclerView cell — the reported gap. Nulling the getter
+        // means no ButtonModel is ever added (flatten null-checks h), so no
+        // cell and no gap; the screen uses its own no-button spacing.
+        LibraryPromoButtonFingerprint.method.addInstructions(
             0,
             """
                 const/4 v0, 0x0
