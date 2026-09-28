@@ -18,14 +18,13 @@ import com.android.tools.smali.dexlib2.iface.reference.FieldReference
  *   `iget-boolean v0, v0, Account;->showMixAIButtonPlayer:Z` is swapped to
  *   `const/4 v0, 0x0` so the branch falls to GONE. Same-register
  *   single-instruction swap; fails loudly if absent or ambiguous.
- * - Playlist AI MIX button: AutomixButtonModel is dropped in the S8/i
- *   adapter funnel (no model = no cell = no gap; covers Epoxy screens).
- *   Its feed-pipeline occurrence is dropped by the "Hide upgrade upsell"
- *   patch's shouldInclude filter — deliberately NOT hooked here: two
- *   patches prepending branched blocks to the same method break
- *   verification on device (VerifyError "target dex pc is not at
- *   instruction start", crash 2026-09-28). A4/a itself is untouched
- *   (switch payloads break under edit).
+ * - Playlist "AI MIX this playlist" button: the client creates the section
+ *   itself in Q.l() gated on Account.showMixAIButtonPlaylist(); forcing
+ *   false means the section is never created (no model = no cell = no
+ *   gap). Deliberately NOT removed in the S8/i Epoxy adapter funnel:
+ *   model list-surgery at submit raced layout and crashed P5/b
+ *   (2026-09-28) — nor in the A4/a factory (wrong field + switch
+ *   payload risk). This flag is the app's own gate: use it.
  *
  * See FeatureButtonsFingerprints.kt.
  */
@@ -61,28 +60,25 @@ val hideFeatureButtonsPatch = bytecodePatch(
             "expected exactly 1 showMixAIButtonPlayer iget in U0, found ${mixAiGets.size}"
         }
         u0.replaceInstructions(mixAiGets[0], "const/4 v0, 0x0")
-        // Adapter-level AutomixButtonModel strip (playlist AI MIX
-        // button): S8/i.e(List) is the single set-models funnel for Epoxy
-        // screens. Iterator-remove here is gap-free and covers screens that
-        // bypass the section-feed filter. v0/v1 are scratch (reassigned by
-        // the original code before use); p1 preserved. Labels are unique in
-        // this method (hidefeat_auto_*).
-        AdapterSetModelsFingerprint.method.addInstructions(
+        // Playlist "AI MIX this playlist" button: the client itself creates
+        // the section in Q.l(songSections) — gated on the server flag
+        // Account.showMixAIButtonPlaylist() (sole reader of that flag;
+        // callers are P5/h playlist data and k5/g feed sections). Forcing
+        // false means the automix_button section is never created: no model
+        // = no cell = no gap, Epoxy-safe (nothing to remove downstream).
+        // REJECTED alternatives (2026-09-28): (a) iterator-removing the
+        // AutomixButtonModel in the S8/i Epoxy adapter funnel — raced
+        // RecyclerView layout and crashed P5/b ("Inconsistency detected.
+        // Invalid item position 3"); (b) early-return in the A4/a section
+        // factory — wrong field (the switch reads Section.type, and the
+        // created section uses type="automix_button" with
+        // displayType="list"), and any factory edit risks the switch
+        // payloads. This flag is the app's own gate: use it.
+        MixAIButtonPlaylistFingerprint.method.addInstructions(
             0,
             """
-                invoke-interface {p1}, Ljava/util/List;->iterator()Ljava/util/Iterator;
-                move-result-object v0
-                :hidefeat_auto_loop
-                invoke-interface {v0}, Ljava/util/Iterator;->hasNext()Z
-                move-result v1
-                if-eqz v1, :hidefeat_auto_done
-                invoke-interface {v0}, Ljava/util/Iterator;->next()Ljava/lang/Object;
-                move-result-object v1
-                instance-of v1, v1, Lcom/anghami/model/adapter/AutomixButtonModel;
-                if-eqz v1, :hidefeat_auto_loop
-                invoke-interface {v0}, Ljava/util/Iterator;->remove()V
-                goto :hidefeat_auto_loop
-                :hidefeat_auto_done
+                const/4 v0, 0x0
+                return v0
             """
         )
     }
