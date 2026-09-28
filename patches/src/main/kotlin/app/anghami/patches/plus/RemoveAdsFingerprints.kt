@@ -1,6 +1,7 @@
 package app.anghami.patches.plus
 
 import app.morphe.patcher.Fingerprint
+import app.morphe.patcher.fieldAccess
 import app.morphe.patcher.methodCall
 import app.morphe.patcher.string
 
@@ -117,6 +118,253 @@ object GetSettingsQuestionFingerprint : Fingerprint(
     parameters = listOf(),
     filters = listOf(
         string("question_setting"),
+    )
+)
+
+/**
+ * Feature-button removals (user-requested 2026-09-28, all verified in
+ * base.apk smali). Each hides through the app's own visibility branch, so
+ * no empty cells or layout gaps remain:
+ *
+ * 1b. Player TRY SING ALONG + song-row karaoke buttons:
+ *     `Account.isShowKaraokeUpsellButton()` (trivial getter on the server
+ *     `showKaraokeUpsellButton` flag) feeds player/ui/l.Q0() (M0 container
+ *     GONE) and y8/a.onCreateViewHolder -> F8/X(SongViewHolder).j(song)
+ *     (row karaoke view GONE). The karaoke FEATURE (isCanUseKaraoke) is a
+ *     separate gate, untouched.
+ * 1a. Player AI MIX switch + label: U0() shows G0/H0 only when the queue is
+ *     automix-eligible AND `Account.showMixAIButtonPlayer` is true; the
+ *     single iget is swapped to const/4 (same register, precedent:
+ *     shuffleOn swaps) so the branch falls to GONE.
+ * 2b. Playlist/album PLAYS IN SHUFFLE badge: all 3 header models'
+ *     getHasShuffleBadge() -> false, so setShuffleBadgeView() sets the
+ *     ShuffleBadgeGroup GONE (ConstraintLayout Group, collapses cleanly).
+ * 2a. Playlist AI MIX button: AutomixButtonModel is added unconditionally
+ *     by the A4/a section factory (no client gate; server sends the
+ *     section), so it is dropped in shouldInclude() like the upsell cards
+ *     (no model = no cell = no gap). A4/a itself is untouched (switch
+ *     payloads break under edit, cf. gap-fix note in RemoveAdsPatch).
+ */
+object KaraokeUpsellButtonFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/ghost/local/Account;",
+    name = "isShowKaraokeUpsellButton",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "Z",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/ghost/local/Account;->showKaraokeUpsellButton:Z"
+        ),
+    )
+)
+
+object PlayerAutomixSwitchFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/player/ui/l;",
+    name = "U0",
+    // NOTE: no accessFlags; single U0()V def in this class. The automix
+    // eligibility call pins the right method.
+    returnType = "V",
+    parameters = listOf(),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/odin/automix/a;",
+            name = "a",
+        ),
+    )
+)
+
+object ShuffleBadgeBaseFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/headers/BaseHeaderModel;",
+    name = "getHasShuffleBadge",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "Z",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/model/adapter/headers/BaseHeaderModel;->hasShuffleBadge:Z"
+        ),
+    )
+)
+
+object ShuffleBadgePlaylistFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/headers/PlaylistHeaderModel;",
+    name = "getHasShuffleBadge",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "Z",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/ghost/pojo/PossiblyGenericModel;->isShuffleMode:Z"
+        ),
+    )
+)
+
+object ShuffleBadgeAlbumFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/headers/AlbumHeaderModel;",
+    name = "getHasShuffleBadge",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "Z",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/ghost/pojo/PossiblyGenericModel;->isShuffleMode:Z"
+        ),
+    )
+)
+
+/**
+ * Card shuffle badges (playlist/album cards in feeds — NOT the header
+ * badge). Two models show a per-card badge straight from the item's
+ * `isShuffleMode` in `_bind`, with no gate method:
+ * - LinkNewCardModel._bind(HeaderLinkHolder): `mlink.isShuffleMode && v0`
+ *   -> shuffleBadge VISIBLE else GONE.
+ * - StoreCarouselSubModel._bind(StoreSubViewHolder): item instanceof
+ *   PossiblyGenericModel && isShuffleMode -> badge VISIBLE else GONE.
+ * Each has exactly one isShuffleMode read, swapped to const/4 (register
+ * taken from the matched instruction).
+ */
+object LinkNewCardBindFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/LinkNewCardModel;",
+    name = "_bind",
+    // NOTE: no accessFlags; the HeaderLinkHolder param disambiguates the
+    // three _bind overloads.
+    returnType = "V",
+    parameters = listOf("Lcom/anghami/model/adapter/LinkNewCardModel\$HeaderLinkHolder;"),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/model/adapter/LinkNewCardModel\$HeaderLinkHolder;->shuffleBadge:Landroid/view/View;"
+        ),
+    )
+)
+
+object StoreCarouselSubBindFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/store/StoreCarouselSubModel;",
+    name = "_bind",
+    // NOTE: no accessFlags; the StoreSubViewHolder param disambiguates the
+    // three _bind overloads.
+    returnType = "V",
+    parameters = listOf("Lcom/anghami/model/adapter/store/StoreCarouselSubModel\$StoreSubViewHolder;"),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/model/adapter/store/StoreCarouselSubModel\$StoreSubViewHolder;",
+            name = "getShuffleBadge",
+        ),
+    )
+)
+
+/**
+ * Row/card shuffle badges part 2 (user follow-up 2026-09-28 — the first
+ * round only covered headers + store/link-new cards, but Library rows and
+ * playlist/album cards use their own paths, all gated on the item's
+ * `isShuffleMode`, one read each unless noted):
+ * - PlaylistRowModel/AlbumRowModel.getSubtitleText(): embeds the shuffle
+ *   drawable (0x7f080663) as an ImageSpan in the row subtitle.
+ * - PlaylistCardModel/AlbumCardModel/LinkCardModel
+ *   .getSubtitleStartingDrawable()I: returns 0x7f080663 when set, -1
+ *   otherwise (swap falls to the -1 branch).
+ * - LinkModel.setSubtitleView(): TWO reads (two span branches) — both
+ *   swapped.
+ * Each swap takes the register from its matched instruction.
+ */
+object PlaylistRowSubtitleFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/PlaylistRowModel;",
+    name = "getSubtitleText",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "Ljava/lang/CharSequence;",
+    parameters = listOf(),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/util/u;",
+            name = "b",
+        ),
+    )
+)
+
+object AlbumRowSubtitleFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/AlbumRowModel;",
+    name = "getSubtitleText",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "Ljava/lang/CharSequence;",
+    parameters = listOf(),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/util/u;",
+            name = "b",
+        ),
+    )
+)
+
+object PlaylistCardDrawableFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/PlaylistCardModel;",
+    name = "getSubtitleStartingDrawable",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "I",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/ghost/pojo/PossiblyGenericModel;->isShuffleMode:Z"
+        ),
+    )
+)
+
+object AlbumCardDrawableFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/AlbumCardModel;",
+    name = "getSubtitleStartingDrawable",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "I",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/ghost/pojo/PossiblyGenericModel;->isShuffleMode:Z"
+        ),
+    )
+)
+
+object LinkCardDrawableFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/LinkCardModel;",
+    name = "getSubtitleStartingDrawable",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "I",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/ghost/pojo/PossiblyGenericModel;->isShuffleMode:Z"
+        ),
+    )
+)
+
+object LinkModelSubtitleFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/LinkModel;",
+    name = "setSubtitleView",
+    // NOTE: no accessFlags; the LinkViewHolder param pins it (private).
+    returnType = "V",
+    parameters = listOf("Lcom/anghami/model/adapter/LinkModel\$LinkViewHolder;"),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/model/adapter/LinkModel\$LinkViewHolder;->subtitleTextView:Landroid/widget/TextView;"
+        ),
+    )
+)
+
+/**
+ * Adapter-level model funnel (S8/i, the EpoxyController base behind
+ * playlist/album/etc. screens). e(List) is the single set-models entry
+ * (called from l/p/s internally); stripping AutomixButtonModel here
+ * removes the playlist AI MIX button gap-free on screens whose models
+ * bypass the section-feed filter (shouldInclude drop stays as
+ * defense-in-depth for pipeline screens).
+ */
+object AdapterSetModelsFingerprint : Fingerprint(
+    definingClass = "LS8/i;",
+    name = "e",
+    // NOTE: no accessFlags; single e(List)V def. The M9/c.o call pins it.
+    returnType = "V",
+    parameters = listOf("Ljava/util/List;"),
+    filters = listOf(
+        methodCall(
+            definingClass = "LM9/c;",
+            name = "o",
+        ),
     )
 )
 
