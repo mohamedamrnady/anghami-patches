@@ -14,9 +14,10 @@ import app.morphe.patcher.patch.resourcePatch
  *   player_bg -> the app window background (day: white, night: #0c0d0d)
  *   player_fg -> the inverse (day: #000000, night: #ffffff)
  *   player_fg_NN -> the same foreground at the stock alpha (10/20/40/60%)
- *   player_accent -> @color/app_color in both modes (magenta day / lime
- *     night stock; Monet dynamic on v31+ with the Monet patch). Every
- *     player BUTTON uses it in both modes; text stays on player_fg.
+ *   player_accent -> @color/branding_yellow in both modes (Anghami lime
+ *     stock; Monet dynamic on v31+ with the Monet patch, which remaps
+ *     branding_yellow to system_primary). Every player BUTTON uses it in
+ *     both modes; text stays on player_fg.
  *
  * `player_fg_NN` are single-state ColorStateLists that REFERENCE
  * `@color/player_fg`, so one file covers both modes: a `<color>` tag
@@ -75,9 +76,10 @@ import app.morphe.patcher.patch.resourcePatch
  * (`AnghamiButton.d()` overwrites `android:textColor`, so the custom
  * `app:textColor`/`app:borderColor` attrs are set explicitly — plus the
  * "Player: accent now-playing + pills" patch for the `m0` runtime
- * overwrite), and — harmless but confirmed no-op — `app:tint` on the
- * like/save/download lotties (they need the companion bytecode patch
- * "Player: accent action icons").
+ * overwrite), the like/save/download lotties (`app:lottie_colorFilter`,
+ * the ctor-supported KeyPath tint — `app:tint`/`setColorFilter` are
+ * no-ops on LottieDrawable), and the lyric line layouts (hardcoded
+ * white → player_fg).
  *
  * Evidence: `gray_dark` is `@color/dark_10` = `#ffa1a5ac` in BOTH
  * qualifiers (`values/colors.xml:238,369`; no `values-night` override), so
@@ -132,12 +134,11 @@ val playerThemePatch = resourcePatch(
         }
 
         // ------------------------------------------------------------------
-        // 3. White-based scrims / fills: repoint the literals at the roles so
-        //    they follow day/night without a -night duplicate.
+        // 3. White-based scrims / fills: REVERTED to stock (round 4). The
+        //    player_fg_20 repoint read as dirty-grey circles/pills in day
+        //    mode (repeat/share backgrounds, selected pills); stock white
+        //    is what the user wants there.
         // ------------------------------------------------------------------
-        repointColor("res/drawable/transparent_white_circle.xml", "#23ffffff", "@color/player_fg_20")
-        repointColor("res/drawable/bg_player_karaoke_button.xml", "#23ffffff", "@color/player_fg_20")
-        repointColor("res/drawable/white_background_rounded_corner_12dp.xml", "@color/white", "@color/player_fg_20")
 
         // ------------------------------------------------------------------
         // 4. Seekbar: new player-only drawables so the TV player, the car
@@ -150,6 +151,20 @@ val playerThemePatch = resourcePatch(
         writeNew("res/drawable/player_seekbar_thumb_pressed_theme.xml", seekbarThumbPressed(theme = true))
         writeNew("res/drawable-night/player_seekbar_thumb_normal_theme.xml", seekbarThumbNormal(theme = false))
         writeNew("res/drawable-night/player_seekbar_thumb_pressed_theme.xml", seekbarThumbPressed(theme = false))
+
+        // ------------------------------------------------------------------
+        // 5. Lyrics: the line layouts paint hardcoded white, unreadable on
+        //    the white day background in BOTH the player page and the
+        //    standalone LyricsActivity (no theme, AppTheme window bg).
+        //    Repoint at player_fg; the grey-state selector lines
+        //    (selector_gray_white) already read fine and stay.
+        // ------------------------------------------------------------------
+        for (path in lyricLineLayouts) {
+            val file = get(path)
+            val text = file.readText()
+            check(text.split("@color/white").size == 2) { "expected exactly 1 white ref in $path" }
+            file.writeText(text.replace("@color/white", "@color/player_fg"))
+        }
     }
 }
 
@@ -159,7 +174,7 @@ val playerThemePatch = resourcePatch(
 
 private const val colorsXmlEntriesDay = """    <color name="player_bg">@color/window_background_color</color>
     <color name="player_fg">@color/dark_1</color>
-    <color name="player_accent">@color/app_color</color>
+    <color name="player_accent">@color/branding_yellow</color>
     <color name="player_fg_10">#1a000000</color>
     <color name="player_fg_20">#33000000</color>
     <color name="player_fg_40">#66000000</color>
@@ -169,7 +184,7 @@ private const val colorsXmlEntriesDay = """    <color name="player_bg">@color/wi
 
 private const val colorsXmlEntriesNight = """    <color name="player_bg">@color/window_background_color</color>
     <color name="player_fg">@color/light_10</color>
-    <color name="player_accent">@color/app_color</color>
+    <color name="player_accent">@color/branding_yellow</color>
     <color name="player_fg_10">#1affffff</color>
     <color name="player_fg_20">#33ffffff</color>
     <color name="player_fg_40">#66ffffff</color>
@@ -199,13 +214,20 @@ private val tintedIcons = setOf(
     "ic_dolbyatmos",
 )
 
-// White lottie buttons. Tint experiment: harmless no-op if LottieDrawable
-// ignores the ImageView tint (karaoke lottie deliberately absent).
+// White lottie buttons, recolored via the ctor-supported
+// app:lottie_colorFilter (karaoke lottie deliberately absent).
 private val lottieButtons = setOf("like_btn", "save_btn", "download_btn")
 
 // Pill buttons whose text/border come from AnghamiButton's own attrs
 // (android:textColor is overwritten in d(), so only app: attrs work).
 private val pillButtons = setOf("btn_shuffle", "btn_more_like_this", "btn_save")
+
+// Lyric line layouts with hardcoded white text (player page + standalone
+// LyricsActivity share them; both were unreadable in day mode).
+private val lyricLineLayouts = listOf(
+    "res/layout/model_epoxy_lyrics_line.xml",
+    "res/layout/lyrics_line_large_layout.xml",
+)
 
 private val playerLayouts = listOf(
     "res/layout/layout_player.xml",
@@ -342,13 +364,6 @@ private fun ResourcePatchContext.appendColors(path: String, entries: String) {
     file.writeText(file.readText().replaceFirst("</resources>", "$entries</resources>"))
 }
 
-private fun ResourcePatchContext.repointColor(path: String, from: String, to: String) {
-    val file = get(path)
-    val text = file.readText()
-    check(from in text) { "$from not found in $path" }
-    file.writeText(text.replace(from, to))
-}
-
 private fun ResourcePatchContext.rewriteLayout(path: String) {
     val file = get(path)
     var text = file.readText()
@@ -375,10 +390,14 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
     //   layout only set buffered/ad-marker colors, so progress ran on
     //   hardcoded white. Played/scrubber are now the accent, unplayed
     //   stays theme-grey.
-    // - Like/save/download lotties: EXPERIMENT (unverified, see kdoc) —
-    //   app:tint is a no-op if LottieDrawable ignores the ImageView tint.
-    //   The real recolor is the "Player: accent action icons" bytecode
-    //   patch; this keeps the XML consistent with it.
+    // - Like/save/download lotties: `app:lottie_colorFilter` — a REAL
+    //   supported attr (LottieAnimationView ctor reads styleable index 7
+    //   and registers a PorterDuff SRC_ATOP KeyPath("**") color filter,
+    //   which persists across setAnimation swaps via the pending list).
+    //   This is why `app:tint`/`ImageView.setColorFilter` were no-ops:
+    //   LottieDrawable.setColorFilter just logs "Use addColorFilter
+    //   instead." The karaoke lottie is colorful by design and is left
+    //   alone.
     var currentTag = ""
     var pendingAppend: String? = null
     // AnghamiButton (shuffle / enhance / save pills) reads its OWN
@@ -409,11 +428,17 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
             hasAppBorderColor = false
         }
         if (currentTag.contains("AnghamiButton")) {
-            if (trimmed.startsWith("android:id=")) {
+            // NOTE: substring match, not startsWith — single-line
+            // elements (e.g. top-bar btn_save) carry id + attrs mid-line
+            // and were silently skipped/mis-detected before (this also
+            // avoids appending a duplicate app:borderColor).
+            if (trimmed.contains("android:id=")) {
                 buttonId = pillButtons.firstOrNull { id -> trimmed.contains(id) }
-            } else if (trimmed.startsWith("app:textColor=")) {
+            }
+            if (trimmed.contains("app:textColor=")) {
                 hasAppTextColor = true
-            } else if (trimmed.startsWith("app:borderColor=")) {
+            }
+            if (trimmed.contains("app:borderColor=")) {
                 hasAppBorderColor = true
             }
         }
@@ -430,7 +455,7 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
                         " app:scrubber_color=\"@color/player_accent\""
                 currentTag.contains("lottie.LottieAnimationView") &&
                     lottieButtons.any { id -> trimmed.contains(id) } ->
-                    " app:tint=\"@color/player_accent\""
+                    " app:lottie_colorFilter=\"@color/player_accent\""
                 else -> null
             }
         }
@@ -446,8 +471,11 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
                 }
             var extra = ""
             if (buttonId != null && trimmed.endsWith("/>")) {
-                if (!hasAppTextColor) extra += " app:textColor=\"@color/player_accent\""
-                if (!hasAppBorderColor) extra += " app:borderColor=\"@color/player_accent\""
+                // Top-bar save is a text action, not a pill: theme text
+                // (black in day, user call), theme border to match.
+                val color = if (buttonId == "btn_save") "@color/player_fg" else "@color/player_accent"
+                if (!hasAppTextColor) extra += " app:textColor=\"$color\""
+                if (!hasAppBorderColor) extra += " app:borderColor=\"$color\""
                 buttonId = null
             }
             if (needsTint || extra.isNotEmpty()) {
