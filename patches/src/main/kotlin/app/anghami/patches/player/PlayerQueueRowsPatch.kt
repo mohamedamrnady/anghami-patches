@@ -35,7 +35,7 @@ val playerQueueRowsPatch = bytecodePatch(
     default = false,
 ) {
     compatibleWith(COMPATIBILITY_ANGHAMI_8_0_28)
-    category("Player theme")
+    category("Experimental")
 
     execute {
         val inverse = QueueRowInverseFingerprint.method
