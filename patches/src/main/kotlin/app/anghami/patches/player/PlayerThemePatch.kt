@@ -63,10 +63,14 @@ import app.morphe.patcher.patch.resourcePatch
  * stops the queue rows from painting white-on-light (that half is code,
  * not resources: the `isInverseColors` flag).
  *
- * Known day-mode gaps left for later (all need bytecode on custom views
- * or lottie assets, none reachable from resources): the white
- * like/download lottie icons, the `PlayButton`'s white disc, and the
- * `AnghamiTimeBar` track/progress paints.
+ * Day-mode whites reached through view attributes (no bytecode needed):
+ * the `PlayButton` disc (generic `color` styleable attr, `@id/play_btn`
+ * only — the ad `@id/btn_play` keeps stock white), the `AnghamiTimeBar`
+ * paints (`played/unplayed/scrubber_color` attrs; it ignores
+ * `progressDrawable`/`thumb`, which is why the player-only copies never
+ * took effect), and — as an unverified experiment — the white
+ * like/save/download lotties via `app:tint` (no-op if LottieDrawable
+ * ignores it).
  *
  * Evidence: `gray_dark` is `@color/dark_10` = `#ffa1a5ac` in BOTH
  * qualifiers (`values/colors.xml:238,369`; no `values-night` override), so
@@ -185,6 +189,10 @@ private val tintedIcons = setOf(
     "ic_bsd_rbt",
     "ic_dolbyatmos",
 )
+
+// White lottie buttons. Tint experiment: harmless no-op if LottieDrawable
+// ignores the ImageView tint (karaoke lottie deliberately absent).
+private val lottieButtons = setOf("like_btn", "save_btn", "download_btn")
 
 private val playerLayouts = listOf(
     "res/layout/layout_player.xml",
@@ -331,20 +339,76 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
     for ((from, to) in attributeSwaps) {
         text = text.replace(from, to)
     }
-    // Add android:tint to the monochrome chrome icons. Decoded layouts put
-    // one element per line, so a line-wise pass is enough; already-tinted
-    // elements (app:tint handled above) are skipped.
+    // Add android:tint to the monochrome chrome icons. NOTE: Morphe's
+    // decode pretty-prints ONE ATTRIBUTE PER LINE (verified via a
+    // diagnostic throw), so the element tag and its android:id never share
+    // a line. The pass tracks the current element and applies each fix to
+    // the element's CLOSING line. (The drawable-anchored tint branch works
+    // regardless: it appends to the srcCompat line, still inside the
+    // element.)
+    //
+    // Per-element fixes (tag + id anchor; constraint references never
+    // contain the class name, so they can't false-positive):
+    // - PlayButton disc (`play_btn` only — the ad layout uses `btn_play`
+    //   and keeps its stock white disc on black): the disc tint comes from
+    //   the generic `color` styleable attr (white default; precedent:
+    //   mini_player_ad_item sets app:color). Day gets a black disc with
+    //   the glyph punched through to white; night stays white.
+    // - AnghamiTimeBar (`player_seekbar`): a fully custom SeekBar that
+    //   ignores android:progressDrawable/thumb and paints from its own
+    //   played/unplayed/scrubber color attrs (Q2/l.b styleable). The
+    //   layout only set buffered/ad-marker colors, so progress ran on
+    //   hardcoded white. Now all three follow player_fg.
+    // - Like/save/download lotties: EXPERIMENT (unverified, see kdoc) —
+    //   app:tint is a no-op if LottieDrawable ignores the ImageView tint,
+    //   and exactly the wanted recolor if it honors it (tinting white
+    //   content always yields the tint color, and night player_fg=white
+    //   is an identity). The karaoke lottie is colorful by design and is
+    //   left alone.
+    var currentTag = ""
+    var pendingAppend: String? = null
     text = text.lineSequence().joinToString("\n") { line ->
-        val trimmed = line.trimEnd()
-        val needsTint = trimmed.endsWith("/>") &&
-            !trimmed.contains("android:tint=") &&
-            tintedIcons.any { icon ->
-                trimmed.contains("\"@drawable/$icon\"")
+        val trimmed = line.trim()
+        if (trimmed.startsWith("<") && !trimmed.startsWith("</") &&
+            !trimmed.startsWith("<!--") && !trimmed.startsWith("<?")
+        ) {
+            currentTag = trimmed.substring(1).substringBefore(" ").substringBefore(">")
+            // A new element cancels any unapplied fix (the id anchor sits
+            // on a later attribute line; see below).
+            pendingAppend = null
+        }
+        // Id anchors may sit on any attribute line inside the element.
+        if (pendingAppend == null) {
+            pendingAppend = when {
+                currentTag.contains("playbutton.PlayButton") &&
+                    trimmed.contains("play_btn") ->
+                    " app:color=\"@color/player_fg\""
+                currentTag.contains("common.widgets.AnghamiTimeBar") &&
+                    trimmed.contains("player_seekbar") ->
+                    " app:played_color=\"@color/player_fg\"" +
+                        " app:unplayed_color=\"@color/player_fg_20\"" +
+                        " app:scrubber_color=\"@color/player_fg\""
+                currentTag.contains("lottie.LottieAnimationView") &&
+                    lottieButtons.any { id -> trimmed.contains(id) } ->
+                    " app:tint=\"@color/player_fg\""
+                else -> null
             }
-        if (needsTint) {
-            line.trimEnd().removeSuffix("/>") + " android:tint=\"@color/player_fg\"/>"
+        }
+        if (pendingAppend != null && trimmed.endsWith("/>")) {
+            val append = pendingAppend!!
+            pendingAppend = null
+            line.trimEnd().removeSuffix("/>") + "$append/>"
         } else {
-            line
+            val needsTint = trimmed.endsWith("/>") &&
+                !trimmed.contains("android:tint=") &&
+                tintedIcons.any { icon ->
+                    trimmed.contains("\"@drawable/$icon\"")
+                }
+            if (needsTint) {
+                line.trimEnd().removeSuffix("/>") + " android:tint=\"@color/player_fg\"/>"
+            } else {
+                line
+            }
         }
     }
     file.writeText(text)
