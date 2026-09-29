@@ -25,10 +25,10 @@ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
  *   `const dark_3` (near-black title/subtitle — invisible on the dark
  *   night player) becomes `app_color`, so title, subtitle, drag/delete
  *   icons and the video badge all follow the accent in both modes. The
- *   equalizer call passed the RAW res id as a color int, so it is
- *   re-pointed at the resolved color (straight-line, same registers).
- *   The `#b3ffffff` row wash (ugly light-grey band at night) is zeroed
- *   to transparent — the accent text + equalizer carry the highlight.
+ *   equalizer takes the same res id (`setBarColor` resolves it via
+ *   `ContextCompat`), so it needs no extra edit. The `#b3ffffff` row wash
+ *   (ugly light-grey band at night) is zeroed to transparent — the accent
+ *   text + equalizer carry the highlight.
  *
  * Note: `SongRowModel` is shared by every song list in the app, so the
  * highlight change applies everywhere, not just the player queue.
@@ -77,7 +77,10 @@ val playerQueueAccentPatch = bytecodePatch(
         }
         hl.replaceInstructions(darkConsts[0], "const v1, 0x7f06002f")
 
-        // --- Equalizer: resolve the color instead of the raw res id. ---
+        // --- Equalizer: nothing to do. `setBarColor(I)` resolves the id
+        // itself via `ContextCompat.getColor` (proven by the
+        // `NotFoundException` a resolved color caused), so the const swap
+        // above already gives it accent bars. Just assert the call site. ---
         val barCalls = hlInsns.mapIndexedNotNull { index, ins ->
             val ref = (ins as? ReferenceInstruction)?.reference as? MethodReference
             if (ref?.definingClass == "Lcom/anghami/ui/view/EqualizerView;" &&
@@ -88,22 +91,9 @@ val playerQueueAccentPatch = bytecodePatch(
                 null
             }
         }
-        // NOTE: indices were captured before the const swap above, but a
-        // 1-for-1 const replacement keeps every index valid.
         check(barCalls.size == 1) {
             "expected exactly 1 EqualizerView.setBarColor in setSongHighlight, found ${barCalls.size}"
         }
-        check(hlInsns[barCalls[0]].opcode == Opcode.INVOKE_VIRTUAL) {
-            "expected invoke-virtual for setBarColor, found ${hlInsns[barCalls[0]].opcode}"
-        }
-        hl.replaceInstructions(
-            barCalls[0],
-            """
-                invoke-direct {p0, v1}, Lcom/anghami/model/adapter/SongRowModel;->getColor(I)I
-                move-result v1
-                invoke-virtual {v0, v1}, Lcom/anghami/ui/view/EqualizerView;->setBarColor(I)V
-            """.trimIndent(),
-        )
 
         // --- Highlight wash: song_row_highlight_color -> transparent. ---
         // Sequence: const v1, <wash>; getColor; move-result v1;

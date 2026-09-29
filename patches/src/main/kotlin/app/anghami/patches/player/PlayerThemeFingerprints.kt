@@ -230,13 +230,12 @@ object QueuePillColorsFingerprint : Fingerprint(
  * `SongRowModel.setSongHighlight()` paints the playing row: title +
  * subtitle via `getColor(dark_3)` (near-black — invisible on the dark
  * night player), drag/delete icons via `setIconTintResource(dark_3)`,
- * equalizer via `setBarColor(<raw dark_3 res id as color int>)`, video
- * badge via `getColor(dark_3)` tint, and the row wash via
- * `getColor(song_row_highlight_color)` (`#b3ffffff` — the ugly light-grey
- * band in night mode). One shared `const v1, 0x7f060117`, so a single
- * const swap to `app_color` recolors title/subtitle/icons/badge to the
- * accent in both modes; the equalizer call is re-pointed at the resolved
- * color (straight-line, no labels) and the wash is zeroed to transparent.
+ * equalizer via `setBarColor(dark_3)` (res id; it self-resolves via
+ * `ContextCompat`), video badge via `getColor(dark_3)` tint, and the row
+ * wash via `getColor(song_row_highlight_color)` (`#b3ffffff` — the ugly
+ * light-grey band in night mode). One shared `const v1, 0x7f060117`, so
+ * a single const swap to `app_color` recolors everything to the accent
+ * in both modes; the wash is zeroed to transparent.
  */
 object SongHighlightFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/model/adapter/SongRowModel;",
