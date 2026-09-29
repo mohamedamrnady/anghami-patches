@@ -40,7 +40,7 @@ val playerQueueAccentPatch = bytecodePatch(
     default = false,
 ) {
     compatibleWith(COMPATIBILITY_ANGHAMI_8_0_28)
-    category("Player theme")
+    category("Experimental")
 
     execute {
         // --- Pills: white -> lime (text + icon tint), grey wash -> theme bg. ---
