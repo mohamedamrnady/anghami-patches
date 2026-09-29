@@ -194,6 +194,10 @@ private val tintedIcons = setOf(
 // ignores the ImageView tint (karaoke lottie deliberately absent).
 private val lottieButtons = setOf("like_btn", "save_btn", "download_btn")
 
+// Pill buttons whose text/border come from AnghamiButton's own attrs
+// (android:textColor is overwritten in d(), so only app: attrs work).
+private val pillButtons = setOf("btn_shuffle", "btn_more_like_this", "btn_save")
+
 private val playerLayouts = listOf(
     "res/layout/layout_player.xml",
     "res/layout-land/layout_player.xml",
@@ -367,6 +371,16 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
     //   left alone.
     var currentTag = ""
     var pendingAppend: String? = null
+    // AnghamiButton (shuffle / enhance / save pills) reads its OWN
+    // textColor/borderColor attrs and overwrites android:textColor in
+    // d(), so the generic swaps never reach it (verified: enhance kept
+    // white with android:textColor=player_fg). Explicit app: attrs win
+    // over the style default (precedent: item_podcast_list sets
+    // app:textColor). Tracked per element; constraint references can't
+    // false-positive because only the android:id= line counts.
+    var buttonId: String? = null
+    var hasAppTextColor = false
+    var hasAppBorderColor = false
     text = text.lineSequence().joinToString("\n") { line ->
         val trimmed = line.trim()
         if (trimmed.startsWith("<") && !trimmed.startsWith("</") &&
@@ -376,6 +390,18 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
             // A new element cancels any unapplied fix (the id anchor sits
             // on a later attribute line; see below).
             pendingAppend = null
+            buttonId = null
+            hasAppTextColor = false
+            hasAppBorderColor = false
+        }
+        if (currentTag.contains("AnghamiButton")) {
+            if (trimmed.startsWith("android:id=")) {
+                buttonId = pillButtons.firstOrNull { id -> trimmed.contains(id) }
+            } else if (trimmed.startsWith("app:textColor=")) {
+                hasAppTextColor = true
+            } else if (trimmed.startsWith("app:borderColor=")) {
+                hasAppBorderColor = true
+            }
         }
         // Id anchors may sit on any attribute line inside the element.
         if (pendingAppend == null) {
@@ -404,8 +430,16 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
                 tintedIcons.any { icon ->
                     trimmed.contains("\"@drawable/$icon\"")
                 }
-            if (needsTint) {
-                line.trimEnd().removeSuffix("/>") + " android:tint=\"@color/player_fg\"/>"
+            var extra = ""
+            if (buttonId != null && trimmed.endsWith("/>")) {
+                if (!hasAppTextColor) extra += " app:textColor=\"@color/player_fg\""
+                if (!hasAppBorderColor) extra += " app:borderColor=\"@color/player_fg\""
+                buttonId = null
+            }
+            if (needsTint || extra.isNotEmpty()) {
+                line.trimEnd().removeSuffix("/>") +
+                    (if (needsTint) " android:tint=\"@color/player_fg\"" else "") +
+                    "$extra/>"
             } else {
                 line
             }
