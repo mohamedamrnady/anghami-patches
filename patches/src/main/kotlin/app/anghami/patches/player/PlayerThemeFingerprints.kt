@@ -103,34 +103,22 @@ object QueueRowInverseFingerprint : Fingerprint(
 )
 
 /**
- * Queue-row bind targets (Anghami 8.0.28, verified in base.apk smali).
+ * Queue-row bind target (Anghami 8.0.28, verified in base.apk smali).
  *
  * The `inverseColors()` no-op (see above) only covers the Epoxy
- * `inverseColorsOnce()` path. The white paint has three more sources that
- * run on EVERY bind and ignore that patch:
- *
- * - `RowModel._bind(RowViewHolder)` (`RowModel.smali:280`): computes the
- *   `textColor` field (white when the inverse flag is set, `primaryText`
- *   otherwise) and paints the title with it. `setNotPlaying()` later
- *   re-applies the same field, so this one site fixes both.
- * - `SongRowModel.removeSongHighlight()` (6 flag reads): repaints title,
- *   subtitle and the more/drag/delete/like icons per flag AFTER
- *   `super._bind`, so it wins over the bind above. This is what keeps
- *   UNSELECTED queue rows white in day mode (the current-song row goes
- *   through `setSongHighlight()` with fixed colors instead, which is why
- *   it already read black).
- * - `SongRowModel.updatePlayState()` (2 reads): equalizer bar color +
- *   row text on play-state changes.
- * - `SongRowModel.getImageConfiguration()` (1 read): cover placeholder
- *   (`ph_rectangle_4d` dark vs `ph_rectangle`).
- *
- * Each patch site is a single `iget-boolean` of `isInverseColors`; the
- * patch inserts a uiMode check that zeroes that register in day mode, so
- * every downstream branch takes the stock non-inverse path (the same
- * colors every other song list in the app uses). Night mode restores the
- * flag to 1 and is byte-for-byte behavior-identical. Only the flag
- * register is touched, so no `.locals` change is needed. Insertions run
- * last-site-first so indices stay valid.
+ * `inverseColorsOnce()` path. The white is repainted on EVERY bind by
+ * `RowModel._bind` (computes the `textColor` field also re-applied by
+ * `setNotPlaying()`), `SongRowModel.removeSongHighlight()` (title/
+ * subtitle/icons after `super._bind` — this is what kept UNSELECTED rows
+ * white while the current-song row used fixed `setSongHighlight()`
+ * colors), `updatePlayState()` (equalizer) and `getImageConfiguration()`
+ * (dark placeholder). All of them read the same model field, and
+ * `SongRowModel._bind` calls `super` first, so forcing the field to false
+ * once at the entry of `RowModel._bind` in day mode fixes every
+ * downstream read on that instance (night leaves it untouched).
+ * Prepended at index 0 with a single register (v0, dead at entry):
+ * mid-method label references assemble to chunk-relative offsets (Morphe
+ * bug that crashed h0 with VerifyError), so no mid-method branches.
  */
 object RowModelBindFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/model/adapter/base/RowModel;",
@@ -144,72 +132,20 @@ object RowModelBindFingerprint : Fingerprint(
     )
 )
 
-object SongRowHighlightFingerprint : Fingerprint(
-    definingClass = "Lcom/anghami/model/adapter/SongRowModel;",
-    name = "removeSongHighlight",
-    returnType = "V",
-    parameters = listOf(),
-    filters = listOf(
-        fieldAccess(
-            smali = "Lcom/anghami/model/adapter/base/ConfigurableModelWithHolder;->isInverseColors:Z"
-        ),
-        methodCall(
-            definingClass = "Landroid/widget/TextView;",
-            name = "setTextColor",
-        ),
-    )
-)
-
-object SongRowPlayStateFingerprint : Fingerprint(
-    definingClass = "Lcom/anghami/model/adapter/SongRowModel;",
-    name = "updatePlayState",
-    returnType = "V",
-    parameters = listOf(),
-    filters = listOf(
-        fieldAccess(
-            smali = "Lcom/anghami/model/adapter/base/ConfigurableModelWithHolder;->isInverseColors:Z"
-        ),
-    )
-)
-
-object SongRowImageConfigFingerprint : Fingerprint(
-    definingClass = "Lcom/anghami/model/adapter/SongRowModel;",
-    name = "getImageConfiguration",
-    returnType = "Lg9/b;",
-    parameters = listOf(),
-    filters = listOf(
-        fieldAccess(
-            smali = "Lcom/anghami/model/adapter/base/ConfigurableModelWithHolder;->isInverseColors:Z"
-        ),
-    )
-)
-
 /**
- * Day-mode action-icon targets (Anghami 8.0.28, verified in base.apk).
+ * Player song-update target (Anghami 8.0.28, verified in base.apk smali).
  *
- * - Like/save/download are `LottieAnimationView`s bound in
- *   `com.anghami.player.ui.l.h0()` (`l.smali:7696-7726`, fields `v`/`x`/`z`).
- *   All four animation assets (`unlike/like`, `unsave/save`, all four
- *   download states) are pure-white fills with no code tinting anywhere
- *   (no `addValueCallback`/`setColorFilter` in the player), and the
- *   `app:tint` resource experiment was confirmed a no-op on device, so the
- *   filter has to be applied in code. The patch appends a uiMode check at
- *   the end of `h0()` (v0/v1 are dead there): day mode applies a black
- *   `ImageView.setColorFilter` (white art + SRC_ATOP black = black
- *   silhouette, alpha preserved; survives `setAnimation` swaps via
- *   `applyColorMod`), night mode clears it. Liked vs unliked states differ
- *   by animation file + visibility, never by color, so tinting is safe for
- *   all states. Karaoke/mixAI lotties are different views and untouched.
- * - Share is `AnimatedShareView`, a custom `View` that hardcodes white
- *   (`-0x1`) into two `Paint`s in its constructor (`k` line/arrow paint,
- *   `l` fill paint; the ONLY `setColor` calls in the class) and draws the
- *   glyph itself in `onDraw`. The patch appends a uiMode check at the end
- *   of `<init>(Context, AttributeSet)` (v0/v1 dead before `return-void`):
- *   day mode repaints both to black, night leaves stock white.
+ * `com.anghami.player.ui.l.U0()` runs on every song/state update and owns
+ * the like/save/download visibility block (`l.smali:4040-4130`, fields
+ * `v`/`x`/`z`) plus the like-state sync (`i.g()`). It starts with
+ * queue/song guards that can exit before the views are touched, so the
+ * hook null-checks each view first. Prepended at index 0 (v0/v1 dead at
+ * entry) with day checks that apply a black `ImageView.setColorFilter` in
+ * day mode and clear it at night.
  */
-object PlayerLottieBindFingerprint : Fingerprint(
+object PlayerSongUpdateFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/l;",
-    name = "h0",
+    name = "U0",
     returnType = "V",
     parameters = listOf(),
     filters = listOf(
@@ -222,6 +158,27 @@ object PlayerLottieBindFingerprint : Fingerprint(
     )
 )
 
+/**
+ * Day-mode action-icon targets (Anghami 8.0.28, verified in base.apk).
+ *
+ * - Like/save/download are `LottieAnimationView`s (fields `v`/`x`/`z`),
+ *   hooked at the entry of the per-song update method `l.U0()` (see
+ *   [PlayerSongUpdateFingerprint]); mid-method labels assemble to
+ *   chunk-relative offsets (Morphe bug that crashed h0), so all new
+ *   branches live at index 0 or use branch-free arithmetic.
+ *   All four animation assets (`unlike/like`, `unsave/save`, all four
+ *   download states) are pure-white fills with no code tinting anywhere
+ *   (no `addValueCallback`/`setColorFilter` in the player), and the
+ *   `app:tint` resource experiment was confirmed a no-op on device, so the
+ *   filter has to be applied in code: day mode applies a black
+ *   `ImageView.setColorFilter`, night mode clears it. State is carried by
+ *   animation file + visibility, never by color, so tinting is state-safe.
+ * - Share is `AnimatedShareView`, a custom `View` that hardcodes white
+ *   (`-0x1`) into two `Paint`s in its constructor (`k` line/arrow paint,
+ *   `l` fill paint; the ONLY `setColor` calls in the class) and draws the
+ *   glyph itself in `onDraw`: hooked branch-free at the end of `<init>`
+ *   (color computed arithmetically, both paints set unconditionally).
+ */
 object ShareViewCtorFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/AnimatedShareView;",
     name = "<init>",
