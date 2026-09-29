@@ -70,13 +70,10 @@ import app.morphe.patcher.patch.resourcePatch
  *   The third lyric layout (`lyrics_line_layout`) already uses the
  *   grey/white selector and stays.
  *
- * Requires the companion bytecode patch "Player: remove cover-art tint" —
+ * Requires the companion bytecode patch "Player theme" —
  * without it the runtime cover color would overwrite `player_bg` on every
  * song change. The tint removal is unconditional (both modes, no per-song
- * color anywhere on the player). Pairs with "Player: readable queue in day
- * mode" (the `isInverseColors` flag) plus "Player: accent now-playing +
- * pills" (unselected queue titles back to `primaryText`, selected row on
- * the accent).
+ * color anywhere on the player).
  *
  * Buttons reached through view attributes (no bytecode needed): the
  * `PlayButton` disc (generic `color` styleable attr, `@id/play_btn`
@@ -87,7 +84,7 @@ import app.morphe.patcher.patch.resourcePatch
  * text + border like every other button, user call:
  * `AnghamiButton.d()` overwrites `android:textColor`, so the custom
  * `app:textColor`/`app:borderColor` attrs are set explicitly — plus the
- * "Player: accent now-playing + pills" patch for the `m0` runtime
+ * "Player theme" bytecode patch for the `m0` runtime
  * overwrite, which now targets `primaryText`), the like/save/download
  * lotties (`app:lottie_colorFilter`, the ctor-supported KeyPath tint —
  * `app:tint`/`setColorFilter` are no-ops on LottieDrawable; all three
@@ -104,7 +101,7 @@ import app.morphe.patcher.patch.resourcePatch
 @Suppress("unused")
 val playerThemePatch = resourcePatch(
     name = "Player theme background",
-    description = "Makes the player background, text, icons and seekbar follow the app's day/night theme. Keeps the darker split below the progress bar. Pair with 'Player: remove cover-art tint'.",
+    description = "Makes the player background, text, icons and seekbar follow the app's day/night theme. Keeps the darker split below the progress bar. Pair with 'Player theme'.",
     default = false,
 ) {
     compatibleWith(COMPATIBILITY_ANGHAMI_8_0_28)
@@ -523,7 +520,7 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
     // white with android:textColor=player_fg). Explicit app: attrs win
     // over the style default (precedent: item_podcast_list sets
     // app:textColor) — but note `playerfeed/c.m0` overwrites the text
-    // AGAIN at runtime, so the "Player: accent now-playing + pills"
+    // AGAIN at runtime, so the "Player theme"
     // bytecode patch swaps that const to primaryText. The border slot is
     // left null there ("don't touch"), so this XML border is what
     // survives. All three pills get plain theme text + border (user call:
