@@ -50,3 +50,54 @@ object PlayerCoverTintFingerprint : Fingerprint(
         ),
     )
 )
+
+/**
+ * Queue-row white-text target (Anghami 8.0.28, verified in Anghami 8.0.28).
+ *
+ * Used by the "Player: readable queue in day mode" patch.
+ *
+ * The queue list (`fragment_player_feed`'s `recycler_view`, rows are
+ * `item_row.xml` bound through `RowModel\$RowViewHolder`) reuses the app's
+ * generic song-row machinery, including its dark-surface support: the
+ * player feed adapter (`S8/i`, flag `.p=true` set by `playerfeed/c.a0`)
+ * propagates `ModelConfiguration.isInverseColors=true` into every queue
+ * `SongRowModel`, and `RowModel\$RowViewHolder.inverseColors()` then paints
+ * title + subtitle `@color/white` plus white action icons. That was
+ * correct when the player background was always the dark cover color, but
+ * with the cover tint removed the day-mode player background is light, so
+ * unselected rows render white-on-light-grey and are unreadable (the
+ * selected row keeps its white card + dark text and stays fine).
+ *
+ * The patch prepends a uiMode night check that returns early in day mode,
+ * so rows keep their theme colors (`primaryText`/`secondaryText`, dark in
+ * day mode); night mode falls through to the original white-text path,
+ * which is still correct on the dark player background. Prepending at
+ * index 0 is register-safe: `.locals 3` means v0-v2 are all dead at
+ * method entry.
+ *
+ * Scope note: holders with their own `inverseColors()` override
+ * (mastheads, library links, free-user/grid queue cards, store carousels)
+ * do NOT route through this method and are untouched. What changes in day
+ * mode is exactly the set of plain-`RowModel` rows bound with the inverse
+ * flag — overwhelmingly the player queue, which is the screen this patch
+ * exists for. If some other day-mode screen ever shows plain rows on a
+ * dark surface with the flag set, those rows would go dark-on-dark; no
+ * such screen is known (all other inverse users bring dark image/card
+ * backgrounds with dedicated holders).
+ */
+object QueueRowInverseFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/base/RowModel\$RowViewHolder;",
+    name = "inverseColors",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "V",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/model/adapter/base/RowModel\$RowViewHolder;->titleTextView:Landroid/widget/TextView;"
+        ),
+        methodCall(
+            definingClass = "Landroid/widget/TextView;",
+            name = "setTextColor",
+        ),
+    )
+)
