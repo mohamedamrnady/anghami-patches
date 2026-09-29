@@ -68,9 +68,11 @@ import app.morphe.patcher.patch.resourcePatch
  * only — the ad `@id/btn_play` keeps stock white), the `AnghamiTimeBar`
  * paints (`played/unplayed/scrubber_color` attrs; it ignores
  * `progressDrawable`/`thumb`, which is why the player-only copies never
- * took effect), and — as an unverified experiment — the white
- * like/save/download lotties via `app:tint` (no-op if LottieDrawable
- * ignores it).
+ * took effect), the shuffle/enhance/save pills (`AnghamiButton.d()`
+ * overwrites `android:textColor`, so the custom `app:textColor`/
+ * `app:borderColor` attrs are set explicitly), and — harmless but
+ * confirmed no-op — `app:tint` on the like/save/download lotties (they
+ * need the companion bytecode patch "Player: day-mode action icons").
  *
  * Evidence: `gray_dark` is `@color/dark_10` = `#ffa1a5ac` in BOTH
  * qualifiers (`values/colors.xml:238,369`; no `values-night` override), so
