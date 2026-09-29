@@ -137,11 +137,10 @@ object RowModelBindFingerprint : Fingerprint(
  *
  * `com.anghami.player.ui.l.U0()` runs on every song/state update and owns
  * the like/save/download visibility block (`l.smali:4040-4130`, fields
- * `v`/`x`/`z`) plus the like-state sync (`i.g()`). It starts with
- * queue/song guards that can exit before the views are touched, so the
- * hook null-checks each view first. Prepended at index 0 (v0-v2 dead at
- * entry): resolves `app_color` and applies it as an
- * `ImageView.setColorFilter` in both modes.
+ * `v`/`x`/`z`) plus the like-state sync (`i.g()`). Currently UNUSED by
+ * any patch (the lottie tint moved to the `app:lottie_colorFilter`
+ * resource attr after `setColorFilter` proved a no-op on
+ * LottieDrawable); kept as a documented hook for per-song player work.
  */
 object PlayerSongUpdateFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/l;",
@@ -162,22 +161,16 @@ object PlayerSongUpdateFingerprint : Fingerprint(
  * Day-mode action-icon targets (Anghami 8.0.28, verified in base.apk).
  *
  * - Like/save/download are `LottieAnimationView`s (fields `v`/`x`/`z`),
- *   hooked at the entry of the per-song update method `l.U0()` (see
- *   [PlayerSongUpdateFingerprint]); mid-method labels assemble to
- *   chunk-relative offsets (Morphe bug that crashed h0), so all new
- *   branches live at index 0 or use branch-free arithmetic.
- *   All four animation assets (`unlike/like`, `unsave/save`, all four
- *   download states) are pure-white fills with no code tinting anywhere
- *   (no `addValueCallback`/`setColorFilter` in the player), and the
- *   `app:tint` resource experiment was confirmed a no-op on device, so the
- *   filter has to be applied in code: `app_color` as an
- *   `ImageView.setColorFilter` in both modes. State is carried by
- *   animation file + visibility, never by color, so tinting is state-safe.
+ *   tinted via the `app:lottie_colorFilter` resource attr (ctor registers
+ *   a persistent KeyPath("**") filter; `app:tint`/`setColorFilter` are
+ *   no-ops because `S3/H.setColorFilter` just logs "Use addColorFilter
+ *   instead."). State is carried by animation file + visibility, never
+ *   by color, so tinting is state-safe.
  * - Share is `AnimatedShareView`, which hardcodes white (`-0x1`) into two
  *   `Paint`s in its constructor (`k` line/arrow paint,
  *   `l` fill paint; the ONLY `setColor` calls in the class) and draws the
  *   glyph itself in `onDraw`: hooked branch-free at the end of `<init>`
- *   (app_color resolved once, both paints set unconditionally).
+ *   (branding_yellow resolved once, both paints set unconditionally).
  */
 object ShareViewCtorFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/AnimatedShareView;",
@@ -203,10 +196,11 @@ object ShareViewCtorFingerprint : Fingerprint(
  * with `g(bg=black_20_transparent, text=white, border=null, icon)` and
  * calls `d()` — which is why the XML `app:textColor` never survived
  * (white text on the light day background; border=null means "don't touch
- * the stroke", so the XML border is what you see). Single `const v1,
- * 0x7f0601fe` (white) feeds both the text int and the icon tint, so one
- * const swap to `app_color` fixes text + icons in both modes. No labels,
- * no branches: `replaceInstructions` on the const only.
+ * the stroke", so the XML border is what you see). The `const white`
+ * feeds both the text int and the icon tint and the `const
+ * black_20_transparent` feeds the wash background, so two const swaps
+ * (white → lime, wash → window_background_color) fix text + icons + bg
+ * in both modes. No labels, no branches.
  */
 object QueuePillColorsFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/app/playerfeed/c;",
@@ -234,7 +228,7 @@ object QueuePillColorsFingerprint : Fingerprint(
  * `ContextCompat`), video badge via `getColor(dark_3)` tint, and the row
  * wash via `getColor(song_row_highlight_color)` (`#b3ffffff` — the ugly
  * light-grey band in night mode). One shared `const v1, 0x7f060117`, so
- * a single const swap to `app_color` recolors everything to the accent
+ * a single const swap to lime recolors everything to the accent
  * in both modes; the wash is zeroed to transparent.
  */
 object SongHighlightFingerprint : Fingerprint(

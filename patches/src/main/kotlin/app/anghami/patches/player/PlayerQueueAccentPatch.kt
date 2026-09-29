@@ -11,7 +11,7 @@ import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction31i
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 
-/** `app_color` = 0x7f06002f (stable id, `res/values/public.xml:1935`). */
+/** Lime accent = 0x7f06005f (`branding_yellow`, stable id). */
 
 /**
  * Player: accent now-playing row + readable pills.
@@ -19,16 +19,16 @@ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
  * Two const swaps, no new branches (label-safe):
  *
  * - Pills (`playerfeed/c.m0`): the single `const white` feeding both the
- *   pill text int and the icon tint becomes `app_color`. Background wash
- *   and null border are untouched, so the XML accent border survives.
+ *   pill text int and the icon tint becomes lime, and the `const
+ *   black_20_transparent` background becomes `window_background_color`
+ *   (white day / dark night — the grey wash was the day complaint).
+ *   Border stays null ("don't touch"), so the XML accent border survives.
  * - Now-playing (`SongRowModel.setSongHighlight`): the shared
  *   `const dark_3` (near-black title/subtitle — invisible on the dark
- *   night player) becomes `app_color`, so title, subtitle, drag/delete
- *   icons and the video badge all follow the accent in both modes. The
- *   equalizer takes the same res id (`setBarColor` resolves it via
- *   `ContextCompat`), so it needs no extra edit. The `#b3ffffff` row wash
- *   (ugly light-grey band at night) is zeroed to transparent — the accent
- *   text + equalizer carry the highlight.
+ *   night player) becomes lime, so title, subtitle, drag/delete icons,
+ *   equalizer and video badge all follow the accent in both modes. The
+ *   `#b3ffffff` row wash (ugly light-grey band at night) is zeroed to
+ *   transparent — the accent text + equalizer carry the highlight.
  *
  * Note: `SongRowModel` is shared by every song list in the app, so the
  * highlight change applies everywhere, not just the player queue.
@@ -43,7 +43,7 @@ val playerQueueAccentPatch = bytecodePatch(
     category("Player theme")
 
     execute {
-        // --- Pills: white -> app_color (text + icon tint). ---
+        // --- Pills: white -> lime (text + icon tint), grey wash -> theme bg. ---
         val m0 = QueuePillColorsFingerprint.method
         val m0Insns = m0.implementation!!.instructions
         val whiteConsts = m0Insns.mapIndexedNotNull { index, ins ->
@@ -58,9 +58,22 @@ val playerQueueAccentPatch = bytecodePatch(
         check(whiteConsts.size == 1) {
             "expected exactly 1 white const in playerfeed/c.m0, found ${whiteConsts.size}"
         }
-        m0.replaceInstructions(whiteConsts[0], "const v1, 0x7f06002f")
+        m0.replaceInstructions(whiteConsts[0], "const v1, 0x7f06005f")
+        val pillBgConsts = m0Insns.mapIndexedNotNull { index, ins ->
+            if (ins.opcode == Opcode.CONST &&
+                (ins as? Instruction31i)?.narrowLiteral == 0x7f060046
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+        check(pillBgConsts.size == 1) {
+            "expected exactly 1 black_20 const in playerfeed/c.m0, found ${pillBgConsts.size}"
+        }
+        m0.replaceInstructions(pillBgConsts[0], "const v0, 0x7f060679")
 
-        // --- Now-playing: dark_3 -> app_color. ---
+        // --- Now-playing: dark_3 -> lime. ---
         val hl = SongHighlightFingerprint.method
         val hlInsns = hl.implementation!!.instructions
         val darkConsts = hlInsns.mapIndexedNotNull { index, ins ->
@@ -75,7 +88,7 @@ val playerQueueAccentPatch = bytecodePatch(
         check(darkConsts.size == 1) {
             "expected exactly 1 dark_3 const in setSongHighlight, found ${darkConsts.size}"
         }
-        hl.replaceInstructions(darkConsts[0], "const v1, 0x7f06002f")
+        hl.replaceInstructions(darkConsts[0], "const v1, 0x7f06005f")
 
         // --- Equalizer: nothing to do. `setBarColor(I)` resolves the id
         // itself via `ContextCompat.getColor` (proven by the
