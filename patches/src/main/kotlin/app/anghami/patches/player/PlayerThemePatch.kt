@@ -14,6 +14,9 @@ import app.morphe.patcher.patch.resourcePatch
  *   player_bg -> the app window background (day: white, night: #0c0d0d)
  *   player_fg -> the inverse (day: #000000, night: #ffffff)
  *   player_fg_NN -> the same foreground at the stock alpha (10/20/40/60%)
+ *   player_accent -> @color/app_color in both modes (magenta day / lime
+ *     night stock; Monet dynamic on v31+ with the Monet patch). Every
+ *     player BUTTON uses it in both modes; text stays on player_fg.
  *
  * `player_fg_NN` are single-state ColorStateLists that REFERENCE
  * `@color/player_fg`, so one file covers both modes: a `<color>` tag
@@ -63,16 +66,18 @@ import app.morphe.patcher.patch.resourcePatch
  * stops the queue rows from painting white-on-light (that half is code,
  * not resources: the `isInverseColors` flag).
  *
- * Day-mode whites reached through view attributes (no bytecode needed):
- * the `PlayButton` disc (generic `color` styleable attr, `@id/play_btn`
+ * Buttons reached through view attributes (no bytecode needed): the
+ * `PlayButton` disc (generic `color` styleable attr, `@id/play_btn`
  * only — the ad `@id/btn_play` keeps stock white), the `AnghamiTimeBar`
- * paints (`played/unplayed/scrubber_color` attrs; it ignores
- * `progressDrawable`/`thumb`, which is why the player-only copies never
- * took effect), the shuffle/enhance/save pills (`AnghamiButton.d()`
- * overwrites `android:textColor`, so the custom `app:textColor`/
- * `app:borderColor` attrs are set explicitly), and — harmless but
- * confirmed no-op — `app:tint` on the like/save/download lotties (they
- * need the companion bytecode patch "Player: day-mode action icons").
+ * paints (`played/scrubber_color` accent, `unplayed` theme-grey; it
+ * ignores `progressDrawable`/`thumb`, which is why the player-only
+ * copies never took effect), the shuffle/enhance/save pills
+ * (`AnghamiButton.d()` overwrites `android:textColor`, so the custom
+ * `app:textColor`/`app:borderColor` attrs are set explicitly — plus the
+ * "Player: accent now-playing + pills" patch for the `m0` runtime
+ * overwrite), and — harmless but confirmed no-op — `app:tint` on the
+ * like/save/download lotties (they need the companion bytecode patch
+ * "Player: accent action icons").
  *
  * Evidence: `gray_dark` is `@color/dark_10` = `#ffa1a5ac` in BOTH
  * qualifiers (`values/colors.xml:238,369`; no `values-night` override), so
@@ -154,6 +159,7 @@ val playerThemePatch = resourcePatch(
 
 private const val colorsXmlEntriesDay = """    <color name="player_bg">@color/window_background_color</color>
     <color name="player_fg">@color/dark_1</color>
+    <color name="player_accent">@color/app_color</color>
     <color name="player_fg_10">#1a000000</color>
     <color name="player_fg_20">#33000000</color>
     <color name="player_fg_40">#66000000</color>
@@ -163,6 +169,7 @@ private const val colorsXmlEntriesDay = """    <color name="player_bg">@color/wi
 
 private const val colorsXmlEntriesNight = """    <color name="player_bg">@color/window_background_color</color>
     <color name="player_fg">@color/light_10</color>
+    <color name="player_accent">@color/app_color</color>
     <color name="player_fg_10">#1affffff</color>
     <color name="player_fg_20">#33ffffff</color>
     <color name="player_fg_40">#66ffffff</color>
@@ -242,9 +249,12 @@ private val attributeSwaps = listOf(
 // ---------------------------------------------------------------------------
 
 private fun seekbarProgress(theme: Boolean): String {
+    // Fill + thumb are the accent in BOTH modes now (user call); only the
+    // track/buffered stay theme-grey. The `theme` flag is kept so the
+    // day/night files still differ in track alpha source.
     val track = if (theme) "@color/player_fg_20" else "@color/white_20_percent_opaque"
     val buffered = if (theme) "@color/player_fg_40" else "@color/white_40_percent_opacity"
-    val fill = if (theme) "@color/player_fg" else "@color/white"
+    val fill = "@color/player_accent"
     return """<?xml version="1.0" encoding="utf-8"?>
 <layer-list
   xmlns:android="http://schemas.android.com/apk/res/android">
@@ -284,7 +294,7 @@ private const val seekbarThumbSelector = """<?xml version="1.0" encoding="utf-8"
 
 private fun seekbarThumbNormal(theme: Boolean): String {
     val inner = if (theme) "#00000000" else "#00ffffff"
-    val ring = if (theme) "@color/player_fg" else "#ffffffff"
+    val ring = "@color/player_accent"
     return """<?xml version="1.0" encoding="utf-8"?>
 <layer-list
   xmlns:android="http://schemas.android.com/apk/res/android">
@@ -305,7 +315,7 @@ private fun seekbarThumbNormal(theme: Boolean): String {
 }
 
 private fun seekbarThumbPressed(theme: Boolean): String {
-    val fill = if (theme) "@color/player_fg" else "#ffffffff"
+    val fill = "@color/player_accent"
     return """<?xml version="1.0" encoding="utf-8"?>
 <layer-list
   xmlns:android="http://schemas.android.com/apk/res/android">
@@ -358,19 +368,17 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
     // - PlayButton disc (`play_btn` only — the ad layout uses `btn_play`
     //   and keeps its stock white disc on black): the disc tint comes from
     //   the generic `color` styleable attr (white default; precedent:
-    //   mini_player_ad_item sets app:color). Day gets a black disc with
-    //   the glyph punched through to white; night stays white.
+    //   mini_player_ad_item sets app:color). Accent disc in both modes.
     // - AnghamiTimeBar (`player_seekbar`): a fully custom SeekBar that
     //   ignores android:progressDrawable/thumb and paints from its own
     //   played/unplayed/scrubber color attrs (Q2/l.b styleable). The
     //   layout only set buffered/ad-marker colors, so progress ran on
-    //   hardcoded white. Now all three follow player_fg.
+    //   hardcoded white. Played/scrubber are now the accent, unplayed
+    //   stays theme-grey.
     // - Like/save/download lotties: EXPERIMENT (unverified, see kdoc) —
-    //   app:tint is a no-op if LottieDrawable ignores the ImageView tint,
-    //   and exactly the wanted recolor if it honors it (tinting white
-    //   content always yields the tint color, and night player_fg=white
-    //   is an identity). The karaoke lottie is colorful by design and is
-    //   left alone.
+    //   app:tint is a no-op if LottieDrawable ignores the ImageView tint.
+    //   The real recolor is the "Player: accent action icons" bytecode
+    //   patch; this keeps the XML consistent with it.
     var currentTag = ""
     var pendingAppend: String? = null
     // AnghamiButton (shuffle / enhance / save pills) reads its OWN
@@ -378,7 +386,11 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
     // d(), so the generic swaps never reach it (verified: enhance kept
     // white with android:textColor=player_fg). Explicit app: attrs win
     // over the style default (precedent: item_podcast_list sets
-    // app:textColor). Tracked per element; constraint references can't
+    // app:textColor) — but note `playerfeed/c.m0` overwrites the text
+    // AGAIN at runtime (white), so the "Player: accent now-playing +
+    // pills" bytecode patch swaps that const to app_color. The border
+    // slot is left null there ("don't touch"), so this XML border is
+    // what survives. Tracked per element; constraint references can't
     // false-positive because only the android:id= line counts.
     var buttonId: String? = null
     var hasAppTextColor = false
@@ -410,15 +422,15 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
             pendingAppend = when {
                 currentTag.contains("playbutton.PlayButton") &&
                     trimmed.contains("play_btn") ->
-                    " app:color=\"@color/player_fg\""
+                    " app:color=\"@color/player_accent\""
                 currentTag.contains("common.widgets.AnghamiTimeBar") &&
                     trimmed.contains("player_seekbar") ->
-                    " app:played_color=\"@color/player_fg\"" +
+                    " app:played_color=\"@color/player_accent\"" +
                         " app:unplayed_color=\"@color/player_fg_20\"" +
-                        " app:scrubber_color=\"@color/player_fg\""
+                        " app:scrubber_color=\"@color/player_accent\""
                 currentTag.contains("lottie.LottieAnimationView") &&
                     lottieButtons.any { id -> trimmed.contains(id) } ->
-                    " app:tint=\"@color/player_fg\""
+                    " app:tint=\"@color/player_accent\""
                 else -> null
             }
         }
@@ -434,13 +446,13 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
                 }
             var extra = ""
             if (buttonId != null && trimmed.endsWith("/>")) {
-                if (!hasAppTextColor) extra += " app:textColor=\"@color/player_fg\""
-                if (!hasAppBorderColor) extra += " app:borderColor=\"@color/player_fg\""
+                if (!hasAppTextColor) extra += " app:textColor=\"@color/player_accent\""
+                if (!hasAppBorderColor) extra += " app:borderColor=\"@color/player_accent\""
                 buttonId = null
             }
             if (needsTint || extra.isNotEmpty()) {
                 line.trimEnd().removeSuffix("/>") +
-                    (if (needsTint) " android:tint=\"@color/player_fg\"" else "") +
+                    (if (needsTint) " android:tint=\"@color/player_accent\"" else "") +
                     "$extra/>"
             } else {
                 line
