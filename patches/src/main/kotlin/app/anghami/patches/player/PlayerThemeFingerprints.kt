@@ -170,7 +170,7 @@ object PlayerSongUpdateFingerprint : Fingerprint(
  *   `Paint`s in its constructor (`k` line/arrow paint,
  *   `l` fill paint; the ONLY `setColor` calls in the class) and draws the
  *   glyph itself in `onDraw`: hooked branch-free at the end of `<init>`
- *   (branding_yellow resolved once, both paints set unconditionally).
+ *   (`primaryText` resolved once, both paints set unconditionally).
  */
 object ShareViewCtorFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/AnimatedShareView;",
@@ -189,6 +189,83 @@ object ShareViewCtorFingerprint : Fingerprint(
 )
 
 /**
+ * Lottie re-tint funnels (Anghami 8.0.28, verified in Anghami 8.0.28).
+ *
+ * The `app:lottie_colorFilter` XML attr only sticks to the FIRST
+ * composition: `LottieAnimationView.<init>` registers the KeyPath("**")
+ * filter on the drawable (`LottieAnimationView:792-805`, queued in
+ * `S3/H.g` while no composition is loaded), but every later
+ * `setComposition` builds fresh layers without it. The player swaps
+ * animations on every state change, so like/download render white
+ * (invisible in day mode) in steady state:
+ *
+ * - `com.anghami.player.ui.j.c(view, comp, resId)` (static): the download
+ *   funnel — called only from the download controller (`e`, `e$b`) with
+ *   preloaded compositions (synchronous `setComposition`).
+ * - `com.anghami.player.ui.i.i(view)` / `j(view)`: the like/save funnel —
+ *   sync `setComposition` when the preloaded comp (`e`/`g` fields) exists,
+ *   async `setAnimation(String)` first load.
+ *
+ * All three are player-scoped (no karaoke/onboarding lottie passes
+ * through them), so no view-id gating is needed. Appends are branch-free
+ * (Morphe label rule) before every `return-void`, re-registering the
+ * accent filter exactly like the ctor does (PorterDuff SRC_ATOP KeyPath
+ * "**" via `LS3/V` + `bugsnag/android/X` + `S3/H.a`). Register-safe: only
+ * v0-v3 are touched and all are dead at each exit (locals + dead params).
+ */
+object LottieSetterFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/player/ui/j;",
+    name = "c",
+    returnType = "V",
+    parameters = listOf(
+        "Lcom/airbnb/lottie/LottieAnimationView;",
+        "LS3/j;",
+        "I",
+    ),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/airbnb/lottie/LottieAnimationView;",
+            name = "setAnimation",
+        ),
+        methodCall(
+            definingClass = "Lcom/airbnb/lottie/LottieAnimationView;",
+            name = "setProgress",
+        ),
+    )
+)
+
+object LikeAnimIFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/player/ui/i;",
+    name = "i",
+    returnType = "V",
+    parameters = listOf("Lcom/airbnb/lottie/LottieAnimationView;"),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/player/ui/i;->e:LS3/j;"
+        ),
+        methodCall(
+            definingClass = "Lcom/airbnb/lottie/LottieAnimationView;",
+            name = "setComposition",
+        ),
+    )
+)
+
+object LikeAnimJFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/player/ui/i;",
+    name = "j",
+    returnType = "V",
+    parameters = listOf("Lcom/airbnb/lottie/LottieAnimationView;"),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/player/ui/i;->g:LS3/j;"
+        ),
+        methodCall(
+            definingClass = "Lcom/airbnb/lottie/LottieAnimationView;",
+            name = "setComposition",
+        ),
+    )
+)
+/**
  * Queue pill-colors target (Anghami 8.0.28, verified in Anghami 8.0.28).
  *
  * `com.anghami.app.playerfeed.c.m0(c$d, Bundle)` (onViewHolderCreated)
@@ -199,7 +276,7 @@ object ShareViewCtorFingerprint : Fingerprint(
  * the stroke", so the XML border is what you see). The `const white`
  * feeds both the text int and the icon tint and the `const
  * black_20_transparent` feeds the wash background, so two const swaps
- * (white → lime, wash → window_background_color) fix text + icons + bg
+ * (white → primaryText, wash → window_background_color) fix text + icons + bg
  * in both modes. No labels, no branches.
  */
 object QueuePillColorsFingerprint : Fingerprint(
@@ -228,12 +305,41 @@ object QueuePillColorsFingerprint : Fingerprint(
  * `ContextCompat`), video badge via `getColor(dark_3)` tint, and the row
  * wash via `getColor(song_row_highlight_color)` (`#b3ffffff` — the ugly
  * light-grey band in night mode). One shared `const v1, 0x7f060117`, so
- * a single const swap to lime recolors everything to the accent
- * in both modes; the wash is zeroed to transparent.
+ * a single const swap to `app_color` recolors everything to the primary
+ * accent in both modes; the wash is zeroed to transparent.
  */
 object SongHighlightFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/model/adapter/SongRowModel;",
     name = "setSongHighlight",
+    returnType = "V",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/model/adapter/SongRowModel;->shouldHighlightRow:Z"
+        ),
+        methodCall(
+            definingClass = "Lcom/anghami/ui/view/EqualizerView;",
+            name = "setBarColor",
+        ),
+    )
+)
+
+/**
+ * Unselected-row target (Anghami 8.0.28, verified in Anghami 8.0.28).
+ *
+ * `SongRowModel.removeSongHighlight()` repaints highlight-capable but
+ * currently-unselected rows: title via `getColor(app_color)` when NOT
+ * inverse (pink title on white day background), white when inverse
+ * (night). One shared `const v2, 0x7f06002f` also feeds the drag/delete
+ * icon tints via `move v1,v2`, so a single const swap to `primaryText`
+ * returns unselected titles + icons to theme text in day mode while ONLY
+ * the playing row (setSongHighlight) carries the accent. Night keeps
+ * stock white; subtitle (`secondaryText`), equalizer
+ * (`equalizer_bar_app_color`) and video badge (`grey_75_to_91`) stay.
+ */
+object RemoveHighlightFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/SongRowModel;",
+    name = "removeSongHighlight",
     returnType = "V",
     parameters = listOf(),
     filters = listOf(

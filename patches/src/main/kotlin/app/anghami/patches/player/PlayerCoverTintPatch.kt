@@ -28,7 +28,9 @@ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
  *    `:cond_1`) still runs.
  *
  * This removes cover-derived backgrounds in BOTH day and night mode — it is
- * not a "light mode only" change.
+ * not a "light mode only" change. The replacement is unconditional (no
+ * uiMode branch), so light and dark get identical treatment: no per-song
+ * color anywhere on the player.
  *
  * Scope: the hook sits in `L0()` rather than in `g9/i.s` on purpose.
  * `g9/i.s` has a second caller, `V5/c` (an `app/base/r` screen), and

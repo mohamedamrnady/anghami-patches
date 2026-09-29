@@ -14,10 +14,12 @@ import app.morphe.patcher.patch.resourcePatch
  *   player_bg -> the app window background (day: white, night: #0c0d0d)
  *   player_fg -> the inverse (day: #000000, night: #ffffff)
  *   player_fg_NN -> the same foreground at the stock alpha (10/20/40/60%)
- *   player_accent -> @color/branding_yellow in both modes (Anghami lime
- *     stock; Monet dynamic on v31+ with the Monet patch, which remaps
- *     branding_yellow to system_primary). Every player BUTTON uses it in
- *     both modes; text stays on player_fg.
+ *   player_accent -> @color/app_color in both modes (Anghami primary
+ *     accent stock: pink day / lime night; Monet dynamic on v31+ with the
+ *     Monet patch, which remaps branding_pink/yellow to system_primary).
+ *     Every player BUTTON uses it in both modes; text stays on player_fg.
+ *   player_on_accent -> inverse text on the accent (day: white on pink,
+ *     night: black on lime). Used for pressed/selected pill fills.
  *
  * `player_fg_NN` are single-state ColorStateLists that REFERENCE
  * `@color/player_fg`, so one file covers both modes: a `<color>` tag
@@ -31,9 +33,15 @@ import app.morphe.patcher.patch.resourcePatch
  * their style-driven grey with now-dark text). `textColor` / `tint` /
  * `borderColor` / `backgroundTint` slots that pointed at `@color/white`,
  * `@color/light_10`, `@color/white_60_percent_opacity` and
- * `@color/color_white_selector_becomes_black` are re-pointed, and the
+ * `@color/color_white_selector_becomes_black` are re-pointed at the
+ * pill text selector (theme text idle like the audio pill, inverse
+ * on-accent text when pressed, user call), and the
  * monochrome chrome icons get an `android:tint` — they are white vector
- * drawables, so a color-slot swap alone would not move them.
+ * drawables, so a color-slot swap alone would not move them. Queue/lyrics
+ * toggle icons use the state-aware `player_pill_icon_selector` (accent
+ * idle, on-accent selected, matching the text) and their pills use
+ * `player_pill_bg_selector` (transparent idle, accent fill selected).
+ * Repeat + the three-dot menu use the plain `player_fg` tint.
  *
  * The split scrims (`iv_gradient` fullscreen + `bg_color` below the
  * seekbar) are re-pointed at a new `player_scrim` role: transparent in
@@ -56,30 +64,37 @@ import app.morphe.patcher.patch.resourcePatch
  *   gets its own `player_seekbar_progress` / `player_seekbar_thumb_theme`
  *   copies so the TV player, car mode and the volume slider keep stock
  *   white.
- * - Lyric line colors (`lyrics_line_layout` /
- *   `lyrics_line_large_layout`) are shared with the standalone
- *   `LyricsActivity`, which paints a dark gradient; flipping them here
- *   would regress that screen. Known gap, see internal notes.
+ * - Lyric line colors (`model_epoxy_lyrics_line` /
+ *   `lyrics_line_large_layout`) are re-pointed at `@color/primaryText`,
+ *   the same theme text every other screen uses (dark day / light night).
+ *   The third lyric layout (`lyrics_line_layout`) already uses the
+ *   grey/white selector and stays.
  *
  * Requires the companion bytecode patch "Player: remove cover-art tint" —
  * without it the runtime cover color would overwrite `player_bg` on every
- * song change. Pairs with "Player: readable queue in day mode", which
- * stops the queue rows from painting white-on-light (that half is code,
- * not resources: the `isInverseColors` flag).
+ * song change. The tint removal is unconditional (both modes, no per-song
+ * color anywhere on the player). Pairs with "Player: readable queue in day
+ * mode" (the `isInverseColors` flag) plus "Player: accent now-playing +
+ * pills" (unselected queue titles back to `primaryText`, selected row on
+ * the accent).
  *
  * Buttons reached through view attributes (no bytecode needed): the
  * `PlayButton` disc (generic `color` styleable attr, `@id/play_btn`
  * only — the ad `@id/btn_play` keeps stock white), the `AnghamiTimeBar`
  * paints (`played/scrubber_color` accent, `unplayed` theme-grey; it
  * ignores `progressDrawable`/`thumb`, which is why the player-only
- * copies never took effect), the shuffle/enhance/save pills
- * (`AnghamiButton.d()` overwrites `android:textColor`, so the custom
+ * copies never took effect), the shuffle/enhance/save pills (plain theme
+ * text + border like every other button, user call:
+ * `AnghamiButton.d()` overwrites `android:textColor`, so the custom
  * `app:textColor`/`app:borderColor` attrs are set explicitly — plus the
  * "Player: accent now-playing + pills" patch for the `m0` runtime
- * overwrite), the like/save/download lotties (`app:lottie_colorFilter`,
- * the ctor-supported KeyPath tint — `app:tint`/`setColorFilter` are
- * no-ops on LottieDrawable), and the lyric line layouts (hardcoded
- * white → player_fg).
+ * overwrite, which now targets `primaryText`), the like/save/download
+ * lotties (`app:lottie_colorFilter`, the ctor-supported KeyPath tint —
+ * `app:tint`/`setColorFilter` are no-ops on LottieDrawable; all three
+ * assets are pure-white fills so the filter recolors them in both modes),
+ * the download progress overlay glyph (`backgroundTint`, same white
+ * asset problem), and the lyric line layouts (hardcoded
+ * white → `primaryText`).
  *
  * Evidence: `gray_dark` is `@color/dark_10` = `#ffa1a5ac` in BOTH
  * qualifiers (`values/colors.xml:238,369`; no `values-night` override), so
@@ -116,6 +131,8 @@ val playerThemePatch = resourcePatch(
         // (verified on device, 2026-09-28), taking the whole player down.
         // Literal day/night values sidestep the whole class of problem and
         // are exactly the stock alphas the player already used.
+        // Plain theme-text selector kept for compatibility (no longer
+        // referenced by the queue pills, which use the accent-fill pair).
         writeNew(
             "res/color/player_fg_selector.xml",
             """<?xml version="1.0" encoding="utf-8"?>
@@ -126,11 +143,90 @@ val playerThemePatch = resourcePatch(
 """,
         )
 
+        // Queue/lyrics toggle pills, accent-fill + inverse on press (user
+        // call): idle = transparent bg + accent icon + theme text
+        // (audio-button style), selected = accent bg + on-accent icon +
+        // on-accent text. Replaces the stock white fill that hid white
+        // text in night mode and only faded text in day mode.
+        writeNew(
+            "res/color/player_pill_text_selector.xml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true" android:color="@color/player_on_accent" />
+    <item android:color="@color/player_fg" />
+</selector>
+""",
+        )
+        writeNew(
+            "res/color/player_pill_icon_selector.xml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true" android:color="@color/player_on_accent" />
+    <item android:color="@color/player_accent" />
+</selector>
+""",
+        )
+        writeNew(
+            "res/drawable/player_pill_bg_selected.xml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/player_accent" />
+    <corners android:radius="12.0dip" />
+</shape>
+""",
+        )
+        writeNew(
+            "res/drawable/player_pill_bg_selector.xml",
+            """<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true" android:drawable="@drawable/player_pill_bg_selected" />
+    <item android:drawable="@android:color/transparent" />
+</selector>
+""",
+        )
+
         // ------------------------------------------------------------------
         // 2. Player chrome layouts.
         // ------------------------------------------------------------------
         for (path in playerLayouts) {
             rewriteLayout(path)
+        }
+
+        // Download progress overlay: a translucent-white glyph View sitting
+        // in the same slot as the download lottie (white-on-white in day
+        // mode). Tint its background with the accent; SRC_IN keeps the
+        // glyph shape and alpha. The element spans several lines, so the
+        // attr goes on its closing line (same one-attr-per-line decode).
+        run {
+            val path = "res/layout/player_download_progress_view.xml"
+            val file = get(path)
+            val text = file.readText()
+            check("@drawable/progress_download_layer_list" in text) {
+                "expected progress_download_layer_list bg in $path"
+            }
+            if (!text.contains("android:backgroundTint=")) {
+                var inTarget = false
+                file.writeText(
+                    text.lineSequence().joinToString("\n") { line ->
+                        val trimmed = line.trim()
+                        if (trimmed.startsWith("<") && !trimmed.startsWith("</") &&
+                            !trimmed.startsWith("<!--") && !trimmed.startsWith("<?")
+                        ) {
+                            inTarget = false
+                        }
+                        if (trimmed.contains("@drawable/progress_download_layer_list")) {
+                            inTarget = true
+                        }
+                        if (inTarget && trimmed.endsWith("/>")) {
+                            inTarget = false
+                            line.trimEnd().removeSuffix("/>") +
+                                " android:backgroundTint=\"@color/player_accent\"/>"
+                        } else {
+                            line
+                        }
+                    },
+                )
+            }
         }
 
         // ------------------------------------------------------------------
@@ -154,16 +250,16 @@ val playerThemePatch = resourcePatch(
 
         // ------------------------------------------------------------------
         // 5. Lyrics: the line layouts paint hardcoded white, unreadable on
-        //    the white day background in BOTH the player page and the
-        //    standalone LyricsActivity (no theme, AppTheme window bg).
-        //    Repoint at player_fg; the grey-state selector lines
-        //    (selector_gray_white) already read fine and stay.
+        //    the white day background. Repoint at the app's standard theme
+        //    text (primaryText) like every other screen, per user call; the
+        //    grey-state selector lines (selector_gray_white) already read
+        //    fine and stay.
         // ------------------------------------------------------------------
         for (path in lyricLineLayouts) {
             val file = get(path)
             val text = file.readText()
             check(text.split("@color/white").size == 2) { "expected exactly 1 white ref in $path" }
-            file.writeText(text.replace("@color/white", "@color/player_fg"))
+            file.writeText(text.replace("@color/white", "@color/primaryText"))
         }
     }
 }
@@ -174,7 +270,8 @@ val playerThemePatch = resourcePatch(
 
 private const val colorsXmlEntriesDay = """    <color name="player_bg">@color/window_background_color</color>
     <color name="player_fg">@color/dark_1</color>
-    <color name="player_accent">@color/branding_yellow</color>
+    <color name="player_accent">@color/app_color</color>
+    <color name="player_on_accent">@color/white</color>
     <color name="player_fg_10">#1a000000</color>
     <color name="player_fg_20">#33000000</color>
     <color name="player_fg_40">#66000000</color>
@@ -184,7 +281,8 @@ private const val colorsXmlEntriesDay = """    <color name="player_bg">@color/wi
 
 private const val colorsXmlEntriesNight = """    <color name="player_bg">@color/window_background_color</color>
     <color name="player_fg">@color/light_10</color>
-    <color name="player_accent">@color/branding_yellow</color>
+    <color name="player_accent">@color/app_color</color>
+    <color name="player_on_accent">@color/black</color>
     <color name="player_fg_10">#1affffff</color>
     <color name="player_fg_20">#33ffffff</color>
     <color name="player_fg_40">#66ffffff</color>
@@ -194,10 +292,10 @@ private const val colorsXmlEntriesNight = """    <color name="player_bg">@color/
 
 // Monochrome white chrome icons. Tinted via android:tint because they are
 // white vector drawables, not color resources. Branded badges (gold
-// EXCLUSIVE, trophy CLAIMED SONG) are intentionally absent.
+// EXCLUSIVE, trophy CLAIMED SONG) are intentionally absent. Queue/lyrics
+// toggle icons are NOT here: they are state-aware (see pillTintIcons).
 private val tintedIcons = setOf(
     "ic_close_player_white_34dp",
-    "ic_context_white_34dp",
     "ic_explicit_white_24dp",
     "ic_previous",
     "ic_next",
@@ -205,13 +303,25 @@ private val tintedIcons = setOf(
     "ic_forward_30s",
     "ic_speed_1_0",
     "ic_sleep_timer",
-    "ic_player_queue_selector",
-    "ic_player_lyrics_selector",
     "ic_settings_filled",
-    "selector_repeat_queue",
     "ic_music_video_bold",
     "ic_bsd_rbt",
     "ic_dolbyatmos",
+)
+
+// Queue/lyrics toggle icons (white/black dual-drawble selectors stock).
+// Idle uses the accent like every other button; selected follows the
+// (un-tinted) text so icon and text always match on the accent fill.
+private val pillTintIcons = setOf(
+    "ic_player_queue_selector",
+    "ic_player_lyrics_selector",
+)
+
+// Chrome icons that follow the normal text color (black day / white
+// night) instead of the accent, per user call.
+private val fgTintIcons = setOf(
+    "ic_context_white_34dp",
+    "selector_repeat_queue",
 )
 
 // White lottie buttons, recolored via the ctor-supported
@@ -222,8 +332,9 @@ private val lottieButtons = setOf("like_btn", "save_btn", "download_btn")
 // (android:textColor is overwritten in d(), so only app: attrs work).
 private val pillButtons = setOf("btn_shuffle", "btn_more_like_this", "btn_save")
 
-// Lyric line layouts with hardcoded white text (player page + standalone
-// LyricsActivity share them; both were unreadable in day mode).
+// Lyric line layouts with hardcoded white text. Re-pointed at the app's
+// standard theme text (primaryText: dark day / light night) like every
+// other screen, per user call.
 private val lyricLineLayouts = listOf(
     "res/layout/model_epoxy_lyrics_line.xml",
     "res/layout/lyrics_line_large_layout.xml",
@@ -245,7 +356,10 @@ private val playerLayouts = listOf(
 
 /** Attribute-level swaps. Longest / most specific first. */
 private val attributeSwaps = listOf(
-    "textColor=\"@color/color_white_selector_becomes_black\"" to "textColor=\"@color/player_fg_selector\"",
+    // Queue/lyrics toggle text: stock white-selected-black becomes
+    // theme-idle / on-accent-selected (audio-button style idle, inverse
+    // text on the accent fill when pressed).
+    "textColor=\"@color/color_white_selector_becomes_black\"" to "textColor=\"@color/player_pill_text_selector\"",
     "textColor=\"@color/white_60_percent_opacity\"" to "textColor=\"@color/player_fg_60\"",
     "app:buffered_color=\"@color/white_40_percent_opacity\"" to "app:buffered_color=\"@color/player_fg_40\"",
     "app:borderColor=\"@color/white\"" to "app:borderColor=\"@color/player_fg\"",
@@ -255,6 +369,9 @@ private val attributeSwaps = listOf(
     "textColor=\"@color/white\"" to "textColor=\"@color/player_fg\"",
     "textColor=\"@color/light_10\"" to "textColor=\"@color/player_fg\"",
     "android:background=\"@color/gray_dark\"" to "android:background=\"@color/player_bg\"",
+    // Queue/lyrics/audio toggle pills: stock transparent-idle / white-fill
+    // selected becomes transparent-idle / accent-fill selected.
+    "android:background=\"@drawable/bg_transparent_to_rounded_white_selector\"" to "android:background=\"@drawable/player_pill_bg_selector\"",
     // The two-tone split scrims (iv_gradient fullscreen + bg_color below the
     // seekbar) are the ONLY black_20_transparent refs in these layouts, so a
     // blanket swap is safe. Day becomes transparent (no more grey wash over
@@ -271,11 +388,11 @@ private val attributeSwaps = listOf(
 // ---------------------------------------------------------------------------
 
 private fun seekbarProgress(theme: Boolean): String {
-    // Fill + thumb are the accent in BOTH modes now (user call); only the
-    // track/buffered stay theme-grey. The `theme` flag is kept so the
-    // day/night files still differ in track alpha source.
-    val track = if (theme) "@color/player_fg_20" else "@color/white_20_percent_opaque"
-    val buffered = if (theme) "@color/player_fg_40" else "@color/white_40_percent_opacity"
+    // Fill + thumb are the primary accent in BOTH modes (app_color: pink
+    // day / lime night stock, Monet dynamic); track/buffered stay
+    // theme-grey via player_fg (single source for both qualifiers).
+    val track = "@color/player_fg_20"
+    val buffered = "@color/player_fg_40"
     val fill = "@color/player_accent"
     return """<?xml version="1.0" encoding="utf-8"?>
 <layer-list
@@ -406,10 +523,11 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
     // white with android:textColor=player_fg). Explicit app: attrs win
     // over the style default (precedent: item_podcast_list sets
     // app:textColor) — but note `playerfeed/c.m0` overwrites the text
-    // AGAIN at runtime (white), so the "Player: accent now-playing +
-    // pills" bytecode patch swaps that const to app_color. The border
-    // slot is left null there ("don't touch"), so this XML border is
-    // what survives. Tracked per element; constraint references can't
+    // AGAIN at runtime, so the "Player: accent now-playing + pills"
+    // bytecode patch swaps that const to primaryText. The border slot is
+    // left null there ("don't touch"), so this XML border is what
+    // survives. All three pills get plain theme text + border (user call:
+    // no accent text). Tracked per element; constraint references can't
     // false-positive because only the android:id= line counts.
     var buttonId: String? = null
     var hasAppTextColor = false
@@ -464,23 +582,34 @@ private fun ResourcePatchContext.rewriteLayout(path: String) {
             pendingAppend = null
             line.trimEnd().removeSuffix("/>") + "$append/>"
         } else {
-            val needsTint = trimmed.endsWith("/>") &&
+            val needsPillTint = trimmed.endsWith("/>") &&
+                !trimmed.contains("android:tint=") &&
+                pillTintIcons.any { icon ->
+                    trimmed.contains("\"@drawable/$icon\"")
+                }
+            val needsFgTint = !needsPillTint && trimmed.endsWith("/>") &&
+                !trimmed.contains("android:tint=") &&
+                fgTintIcons.any { icon ->
+                    trimmed.contains("\"@drawable/$icon\"")
+                }
+            val needsTint = !needsPillTint && !needsFgTint && trimmed.endsWith("/>") &&
                 !trimmed.contains("android:tint=") &&
                 tintedIcons.any { icon ->
                     trimmed.contains("\"@drawable/$icon\"")
                 }
             var extra = ""
             if (buttonId != null && trimmed.endsWith("/>")) {
-                // Top-bar save is a text action, not a pill: theme text
-                // (black in day, user call), theme border to match.
-                val color = if (buttonId == "btn_save") "@color/player_fg" else "@color/player_accent"
-                if (!hasAppTextColor) extra += " app:textColor=\"$color\""
-                if (!hasAppBorderColor) extra += " app:borderColor=\"$color\""
+                // Feed pills + top-bar save: plain theme text and border
+                // (user call: no accent text on shuffle/enhance/save).
+                if (!hasAppTextColor) extra += " app:textColor=\"@color/player_fg\""
+                if (!hasAppBorderColor) extra += " app:borderColor=\"@color/player_fg\""
                 buttonId = null
             }
-            if (needsTint || extra.isNotEmpty()) {
+            if (needsTint || needsPillTint || needsFgTint || extra.isNotEmpty()) {
                 line.trimEnd().removeSuffix("/>") +
                     (if (needsTint) " android:tint=\"@color/player_accent\"" else "") +
+                    (if (needsPillTint) " android:tint=\"@color/player_pill_icon_selector\"" else "") +
+                    (if (needsFgTint) " android:tint=\"@color/player_fg\"" else "") +
                     "$extra/>"
             } else {
                 line
