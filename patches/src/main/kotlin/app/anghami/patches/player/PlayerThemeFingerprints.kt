@@ -139,9 +139,9 @@ object RowModelBindFingerprint : Fingerprint(
  * the like/save/download visibility block (`l:4040-4130`, fields
  * `v`/`x`/`z`) plus the like-state sync (`i.g()`). It starts with
  * queue/song guards that can exit before the views are touched, so the
- * hook null-checks each view first. Prepended at index 0 (v0/v1 dead at
- * entry) with day checks that apply a black `ImageView.setColorFilter` in
- * day mode and clear it at night.
+ * hook null-checks each view first. Prepended at index 0 (v0-v2 dead at
+ * entry): resolves `app_color` and applies it as an
+ * `ImageView.setColorFilter` in both modes.
  */
 object PlayerSongUpdateFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/l;",
@@ -170,14 +170,14 @@ object PlayerSongUpdateFingerprint : Fingerprint(
  *   download states) are pure-white fills with no code tinting anywhere
  *   (no `addValueCallback`/`setColorFilter` in the player), and the
  *   `app:tint` resource experiment was confirmed a no-op on device, so the
- *   filter has to be applied in code: day mode applies a black
- *   `ImageView.setColorFilter`, night mode clears it. State is carried by
+ *   filter has to be applied in code: `app_color` as an
+ *   `ImageView.setColorFilter` in both modes. State is carried by
  *   animation file + visibility, never by color, so tinting is state-safe.
- * - Share is `AnimatedShareView`, a custom `View` that hardcodes white
- *   (`-0x1`) into two `Paint`s in its constructor (`k` line/arrow paint,
+ * - Share is `AnimatedShareView`, which hardcodes white (`-0x1`) into two
+ *   `Paint`s in its constructor (`k` line/arrow paint,
  *   `l` fill paint; the ONLY `setColor` calls in the class) and draws the
  *   glyph itself in `onDraw`: hooked branch-free at the end of `<init>`
- *   (color computed arithmetically, both paints set unconditionally).
+ *   (app_color resolved once, both paints set unconditionally).
  */
 object ShareViewCtorFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/AnimatedShareView;",
@@ -191,6 +191,65 @@ object ShareViewCtorFingerprint : Fingerprint(
         methodCall(
             definingClass = "Landroid/graphics/Paint;",
             name = "setColor",
+        ),
+    )
+)
+
+/**
+ * Queue pill-colors target (Anghami 8.0.28, verified in Anghami 8.0.28).
+ *
+ * `com.anghami.app.playerfeed.c.m0(c$d, Bundle)` (onViewHolderCreated)
+ * overwrites BOTH pill buttons' `AnghamiButton.b` models AFTER inflation
+ * with `g(bg=black_20_transparent, text=white, border=null, icon)` and
+ * calls `d()` — which is why the XML `app:textColor` never survived
+ * (white text on the light day background; border=null means "don't touch
+ * the stroke", so the XML border is what you see). Single `const v1,
+ * 0x7f0601fe` (white) feeds both the text int and the icon tint, so one
+ * const swap to `app_color` fixes text + icons in both modes. No labels,
+ * no branches: `replaceInstructions` on the const only.
+ */
+object QueuePillColorsFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/app/playerfeed/c;",
+    name = "m0",
+    returnType = "V",
+    parameters = listOf("Lcom/anghami/app/playerfeed/c\$d;", "Landroid/os/Bundle;"),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/pablo/anghami_ui/AnghamiButton;->b:Ln8/g;"
+        ),
+        methodCall(
+            definingClass = "Lcom/anghami/pablo/anghami_ui/AnghamiButton;",
+            name = "d",
+        ),
+    )
+)
+
+/**
+ * Now-playing highlight target (Anghami 8.0.28, verified in Anghami 8.0.28).
+ *
+ * `SongRowModel.setSongHighlight()` paints the playing row: title +
+ * subtitle via `getColor(dark_3)` (near-black — invisible on the dark
+ * night player), drag/delete icons via `setIconTintResource(dark_3)`,
+ * equalizer via `setBarColor(<raw dark_3 res id as color int>)`, video
+ * badge via `getColor(dark_3)` tint, and the row wash via
+ * `getColor(song_row_highlight_color)` (`#b3ffffff` — the ugly light-grey
+ * band in night mode). One shared `const v1, 0x7f060117`, so a single
+ * const swap to `app_color` recolors title/subtitle/icons/badge to the
+ * accent in both modes; the equalizer call is re-pointed at the resolved
+ * color (straight-line, no labels) and the wash is zeroed to transparent.
+ */
+object SongHighlightFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/model/adapter/SongRowModel;",
+    name = "setSongHighlight",
+    returnType = "V",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/model/adapter/SongRowModel;->shouldHighlightRow:Z"
+        ),
+        methodCall(
+            definingClass = "Lcom/anghami/ui/view/EqualizerView;",
+            name = "setBarColor",
         ),
     )
 )
