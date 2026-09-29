@@ -22,7 +22,7 @@ All patches are enabled by default (`default=true`) — disable any you don't ne
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.2.0-dev.1](https://github.com/mohamedamrnady/anghami-patches/releases/tag/v1.2.0-dev.1)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;17 patches total
+> **[v1.2.0](https://github.com/mohamedamrnady/anghami-patches/releases/tag/v1.2.0)**&nbsp;&nbsp;•&nbsp;&nbsp;`main`&nbsp;&nbsp;•&nbsp;&nbsp;17 patches total
 <details open>
 <summary>📦 Anghami&nbsp;&nbsp;•&nbsp;&nbsp;17 patches</summary>
 <br>
@@ -41,8 +41,8 @@ All patches are enabled by default (`default=true`) — disable any you don't ne
 | [Hide upsell feature buttons](#hide-upsell-feature-buttons) | Hides TRY SING ALONG karaoke upsell, the player AI MIX switch, and the playlist AI MIX button. Feature gates untouched. |  |
 | [Monet dynamic colors](#monet-dynamic-colors) | Replaces the static neon brand accents with wallpaper-based Monet dynamic colors (M3 Expressive primary/secondary/tertiary roles) on Android 12+. Older versions keep stock colors. |  |
 | [Player theme background](#player-theme-background) | Makes the player background, text, icons and seekbar follow the app's day/night theme. Keeps the darker split below the progress bar. Pair with 'Player: remove cover-art tint'. |  |
-| [Player: accent action icons](#player-accent-action-icons) | Paints the share button with the lime accent (stock, Monet dynamic) in both day and night mode. The like/download lotties are handled via the lottie_colorFilter resource attr. |  |
-| [Player: accent now-playing + pills](#player-accent-now-playing-pills) | Paints the now-playing queue row and the shuffle/enhance pills with the primary accent (lime stock, Monet dynamic) instead of near-black/white. Removes the grey highlight wash. |  |
+| [Player: accent action icons](#player-accent-action-icons) | Paints the share button with the normal theme text color (black day / white night) and keeps the like/download lotties on the primary accent (pink day / lime night, Monet dynamic) across animation swaps. |  |
+| [Player: accent now-playing + pills](#player-accent-now-playing-pills) | Paints the now-playing queue row with the primary accent (pink day / lime night stock, Monet dynamic). Shuffle/enhance/save pills and unselected rows stay on theme text. Removes the grey highlight wash. |  |
 | [Player: readable queue in day mode](#player-readable-queue-in-day-mode) | Keeps the player queue rows in theme text colors in day mode instead of unreadable white-on-light. Night mode is unchanged. |  |
 | [Player: remove cover-art tint](#player-remove-cover-art-tint) | Stops the player background from being tinted by the current album cover, in both day and night mode. |  |
 | [Remove popup promos](#remove-popup-promos) | No-ops the in-house popup funnel, the fullscreen startup dialog, and the flyer ad callback. Google SDK ads untouched. |  |
