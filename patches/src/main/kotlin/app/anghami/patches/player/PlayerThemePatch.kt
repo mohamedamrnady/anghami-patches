@@ -22,18 +22,26 @@ import app.morphe.patcher.patch.resourcePatch
  *
  * Layouts touched: the player shell (portrait + landscape), top bar,
  * controls (portrait / landscape / land), secondary state controls (both
- * orientations), the song page and the karaoke upsell label. `textColor` /
- * `tint` / `borderColor` / `backgroundTint` slots that pointed at
- * `@color/white`, `@color/light_10`, `@color/white_60_percent_opacity` and
+ * orientations), the song page, the karaoke upsell label and the queue
+ * feed (`fragment_player_feed`: the "In the queue" header; the pills keep
+ * their style-driven grey with now-dark text). `textColor` / `tint` /
+ * `borderColor` / `backgroundTint` slots that pointed at `@color/white`,
+ * `@color/light_10`, `@color/white_60_percent_opacity` and
  * `@color/color_white_selector_becomes_black` are re-pointed, and the
  * monochrome chrome icons get an `android:tint` — they are white vector
  * drawables, so a color-slot swap alone would not move them.
  *
+ * The split scrims (`iv_gradient` fullscreen + `bg_color` below the
+ * seekbar) are re-pointed at a new `player_scrim` role: transparent in
+ * day mode, stock 20% black at night. Day mode used to stack two black
+ * scrims over the white theme background and read as a dirty grey wash;
+ * now the top is clean theme background with one 20% band below the
+ * seekbar. Night mode is pixel-identical to stock.
+ *
  * WHAT IS DELIBERATELY PRESERVED
- * - The two-tone split at the progress bar. `iv_gradient`
- *   (`@color/black_20_transparent`) and `layout_player_controls`'s
- *   `bg_color` are NOT touched, so the darker band below the seekbar
- *   survives; it is now black-20% over the theme background.
+ * - The two-tone split at the progress bar (see above): it is now white
+ *   vs one 20% band in day mode instead of grey vs double-grey, and
+ *   untouched at night.
  * - `layout_player_banner.xml` (promoted-song card) keeps its own
  *   `black_80_transparent` CardView and light-on-dark text.
  * - The promoted-ad countdown ring and its drawables keep stock white
@@ -51,7 +59,14 @@ import app.morphe.patcher.patch.resourcePatch
  *
  * Requires the companion bytecode patch "Player: remove cover-art tint" —
  * without it the runtime cover color would overwrite `player_bg` on every
- * song change.
+ * song change. Pairs with "Player: readable queue in day mode", which
+ * stops the queue rows from painting white-on-light (that half is code,
+ * not resources: the `isInverseColors` flag).
+ *
+ * Known day-mode gaps left for later (all need bytecode on custom views
+ * or lottie assets, none reachable from resources): the white
+ * like/download lottie icons, the `PlayButton`'s white disc, and the
+ * `AnghamiTimeBar` track/progress paints.
  *
  * Evidence: `gray_dark` is `@color/dark_10` = `#ffa1a5ac` in BOTH
  * qualifiers (`values/colors.xml:238,369`; no `values-night` override), so
@@ -137,6 +152,7 @@ private const val colorsXmlEntriesDay = """    <color name="player_bg">@color/wi
     <color name="player_fg_20">#33000000</color>
     <color name="player_fg_40">#66000000</color>
     <color name="player_fg_60">#99000000</color>
+    <color name="player_scrim">@android:color/transparent</color>
 """
 
 private const val colorsXmlEntriesNight = """    <color name="player_bg">@color/window_background_color</color>
@@ -145,6 +161,7 @@ private const val colorsXmlEntriesNight = """    <color name="player_bg">@color/
     <color name="player_fg_20">#33ffffff</color>
     <color name="player_fg_40">#66ffffff</color>
     <color name="player_fg_60">#99ffffff</color>
+    <color name="player_scrim">@color/black_20_transparent</color>
 """
 
 // Monochrome white chrome icons. Tinted via android:tint because they are
@@ -180,6 +197,7 @@ private val playerLayouts = listOf(
     "res/layout/layout_player_state_controls_vertical.xml",
     "res/layout/player_song_layout.xml",
     "res/layout-land/player_song_layout.xml",
+    "res/layout/fragment_player_feed.xml",
 )
 
 /** Attribute-level swaps. Longest / most specific first. */
@@ -194,6 +212,12 @@ private val attributeSwaps = listOf(
     "textColor=\"@color/white\"" to "textColor=\"@color/player_fg\"",
     "textColor=\"@color/light_10\"" to "textColor=\"@color/player_fg\"",
     "android:background=\"@color/gray_dark\"" to "android:background=\"@color/player_bg\"",
+    // The two-tone split scrims (iv_gradient fullscreen + bg_color below the
+    // seekbar) are the ONLY black_20_transparent refs in these layouts, so a
+    // blanket swap is safe. Day becomes transparent (no more grey wash over
+    // the white theme background; the split survives as white vs one 20%
+    // band below the seekbar); night keeps the stock 20% darkening.
+    "android:background=\"@color/black_20_transparent\"" to "android:background=\"@color/player_scrim\"",
     "android:progressDrawable=\"@drawable/progress_player\"" to "android:progressDrawable=\"@drawable/player_seekbar_progress\"",
     "android:thumb=\"@drawable/player_seekbar_thumb\"" to "android:thumb=\"@drawable/player_seekbar_thumb_theme\"",
 )
