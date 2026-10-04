@@ -1,3 +1,9 @@
+## [1.3.0-dev.1](https://github.com/mohamedamrnady/anghami-patches/compare/v1.2.0...v1.3.0-dev.1) (2026-10-04)
+
+### ✨ New Features
+
+* sticky shuffle + explicit header Play/Shuffle buttons ([b790ee2](https://github.com/mohamedamrnady/anghami-patches/commit/b790ee2783355370153c28ce9db2f73cc66cd000))
+
 ## [1.2.0](https://github.com/mohamedamrnady/anghami-patches/compare/v1.1.0...v1.2.0) (2026-09-29)
 
 ### 🐛 Bug Fixes
