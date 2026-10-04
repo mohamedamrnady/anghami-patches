@@ -160,3 +160,31 @@ object RadioShuffleMessageFingerprint : Fingerprint(
         string("shuffle"),
     )
 )
+
+/**
+ * Client-intent shuffle writer (Anghami 8.0.28, verified in Anghami 8.0.28:
+ * PlayQueue `setShuffleMode(ZZ)`, private).
+ *
+ * The ONLY three callers are all explicit user intent:
+ * - `shuffle()` (header Shuffle tap via `c.play` v3-gate / `k5/f$a` p1-gate),
+ * - `toggleShuffle()` (queue-screen/car/bottom-sheet/song-card toggles via
+ *   `Manager.toggleShuffle`, itself fed by K5/a, q6/e$a, VideoWrapperView$d,
+ *   E8/g$e, PlayerService$e),
+ * - `setShuffle(Z)` (via `Manager.setShuffle`, no other callers — same UI).
+ *
+ * Server sync NEVER routes through here (`fillFromSyncData` /
+ * `updateFromSocketPayload` write `isShuffleMode` via direct iput), so a
+ * save-hook placed AFTER the early exits (mode-changed + non-empty songs,
+ * right after the `isShuffleMode` iput) records exactly the modes the user
+ * chose — never a server value, never a no-op'd live-radio toggle.
+ */
+object SetShuffleModeFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/odin/playqueue/PlayQueue;",
+    name = "setShuffleMode",
+    // NOTE: no accessFlags (private in 8.0.28; exact-int matching brittle).
+    returnType = "V",
+    parameters = listOf("Z", "Z"),
+    filters = listOf(
+        string("PlayQueue: setShuffleMode() called isShuffleMode : "),
+    )
+)
