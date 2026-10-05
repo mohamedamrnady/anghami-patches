@@ -147,6 +147,11 @@ public final class LrclibFallback {
 
             final String key = cacheKey(song);
             Cached hit = readCache(ctx, key);
+            if (hit == null) {
+                // Migration: entries written before the id-primary key.
+                String legacy = legacyCacheKey(song);
+                if (!legacy.equals(key)) hit = readCache(ctx, legacy);
+            }
             if (hit != null) {
                 if (hit.miss) {
                     Log.d(TAG, "negative cache hit, keeping server view for songId=" + song.id);
@@ -361,6 +366,16 @@ public final class LrclibFallback {
     }
 
     private static String cacheKey(SongInfo song) {
+        // ID-primary: the server can return slightly different artist/title
+        // strings for the same song across sessions (feat. variants,
+        // parens). Keying on the stable song id means a cached LRCLIB
+        // result keeps winning over future truncated teasers for that song.
+        if (song.id != null && !song.id.isEmpty()) return song.id + "|" + KEY_VERSION;
+        return song.id + "|" + normalize(song.artist, true)
+                + "|" + normalize(song.title, true) + "|" + KEY_VERSION;
+    }
+
+    private static String legacyCacheKey(SongInfo song) {
         return song.id + "|" + normalize(song.artist, true)
                 + "|" + normalize(song.title, true) + "|" + KEY_VERSION;
     }
@@ -1072,6 +1087,15 @@ public final class LrclibFallback {
                                 return;
                             }
                             remember(r.queryUsed, r.source, r.plain, r.synced);
+                            // Retry wins and sticks: cache under the song id so
+                            // future opens load it instead of the truncated teaser.
+                            try {
+                                SongInfo orig = readSong(song);
+                                writePositiveCache(c.getApplicationContext() != null
+                                        ? c.getApplicationContext() : c,
+                                        cacheKey(orig), r);
+                            } catch (Exception ignored) {
+                            }
                             renderOnMain(c.getApplicationContext() != null
                                     ? c.getApplicationContext() : c,
                                     song, callback, r.plain, r.synced, r.queryUsed, false);
