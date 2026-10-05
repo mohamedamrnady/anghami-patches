@@ -161,7 +161,17 @@ public final class LrclibFallback {
             Cached hit = lookupCache(ctx, song, key);
             if (hit != null) {
                 if (hit.miss) {
-                    Log.d(TAG, "negative cache hit, keeping server view for songId=" + song.id);
+                    Log.d(TAG, "negative cache hit for songId=" + song.id);
+                    // Still guide the user: the server view alone (teaser
+                    // or empty) never mentions the long-press options.
+                    // Full native responses returned above, so this is a
+                    // truncated teaser or nothing — safe to own the screen.
+                    if (serverEmpty) {
+                        renderOnMain(ctx, songObj, callbackObj,
+                                tr("no_result"), null, "no-result", false);
+                    } else if (responseObj != null) {
+                        renderTeaserWithGuide(ctx, songObj, callbackObj, responseObj);
+                    }
                     return;
                 }
                 remember(hit.queryUsed, hit.source, hit.plain, hit.synced);
@@ -173,7 +183,7 @@ public final class LrclibFallback {
                 // Own the screen immediately: empty state becomes a loading
                 // placeholder instead of the song-has-no-lyrics path.
                 renderOnMain(ctx, songObj, callbackObj,
-                        "Searching LRCLIB…", null, "placeholder", false);
+                        tr("searching"), null, "placeholder", false);
             }
 
             final Context appCtx = ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
@@ -200,8 +210,15 @@ public final class LrclibFallback {
                         Log.d(TAG, "no-match for songId=" + songFinal.id);
                         if (serverEmptyFinal) {
                             renderOnMain(appCtx, songRef, cbRef,
-                                    "No lyrics found.\nLong-press to search manually.",
-                                    null, "no-result", false);
+                                    tr("no_result"), null, "no-result", false);
+                        } else {
+                            // Server holds a (truncated) teaser but LRCLIB
+                            // has nothing: keep the teaser visible and
+                            // append the long-press guide. The unlock
+                            // button is a native no-op (A5/t.onClick
+                            // returns void), so the guide is the only way
+                            // to the manual search.
+                            renderTeaserWithGuide(appCtx, songRef, cbRef, responseObj);
                         }
                         return;
                     }
@@ -231,17 +248,35 @@ public final class LrclibFallback {
             } catch (Exception ignored) {
             }
             if (ctx == null) return;
-            final Object song;
-            synchronized (LrclibFallback.class) {
-                song = lastSong;
+            // The dialog edits the CURRENTLY PLAYING song — not the last
+            // lyrics request (pre-cached/next-track responses overwrite
+            // lastSong while another song plays). PlayQueueManager is the
+            // source of truth; lastSong is only the fallback.
+            Object song = currentPlayingSong();
+            if (song == null) {
+                synchronized (LrclibFallback.class) {
+                    song = lastSong;
+                }
             }
             if (song == null) {
-                Toast.makeText(ctx, "No lyrics loaded yet", Toast.LENGTH_SHORT).show();
+                Toast.makeText(ctx, tr("no_loaded"), Toast.LENGTH_SHORT).show();
                 return;
             }
             showOptionsForSong(ctx, song);
         } catch (Throwable t) {
             Log.d(TAG, "showLyricsOptions failed: " + t);
+        }
+    }
+
+    /** Currently playing song, or null. Reflection-only, never throws. */
+    private static Object currentPlayingSong() {
+        try {
+            Class<?> pqm = Class.forName("com.anghami.odin.playqueue.PlayQueueManager");
+            Object inst = pqm.getMethod("getSharedInstance").invoke(null);
+            if (inst == null) return null;
+            return pqm.getMethod("getCurrentSong").invoke(inst);
+        } catch (Throwable t) {
+            return null;
         }
     }
 
@@ -383,6 +418,51 @@ public final class LrclibFallback {
         }
     }
 
+    /**
+     * LRCLIB miss while the server holds a (truncated) teaser: re-render
+     * the teaser with the long-press guide appended, so the user can
+     * still reach the manual search. Plain path only.
+     */
+    private static void renderTeaserWithGuide(Context ctx, Object songObj,
+                                              Object callbackObj, Object responseObj) {
+        try {
+            String teaser = teaserText(responseObj);
+            if (teaser == null || teaser.trim().isEmpty()) {
+                renderOnMain(ctx, songObj, callbackObj,
+                        tr("no_result"), null, "no-result", false);
+                return;
+            }
+            renderOnMain(ctx, songObj, callbackObj,
+                    teaser + "\n\n" + tr("guide_teaser"), null, "teaser-guide", false);
+        } catch (Throwable t) {
+            Log.d(TAG, "renderTeaserWithGuide failed: " + t);
+        }
+    }
+
+    /** Best-effort teaser text out of a truncated server response. */
+    private static String teaserText(Object responseObj) {
+        try {
+            String unsynced = getString(responseObj, "lyricsUnsynced");
+            if (unsynced != null && !unsynced.trim().isEmpty()) return unsynced;
+            List<?> synced = getList(responseObj, "lyricsSynced");
+            if (synced == null || synced.isEmpty()) return null;
+            StringBuilder sb = new StringBuilder();
+            for (Object line : synced) {
+                try {
+                    Object text = getFieldUp(line, "line");
+                    if (text instanceof String && !((String) text).trim().isEmpty()) {
+                        if (sb.length() > 0) sb.append('\n');
+                        sb.append((String) text);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            return sb.length() == 0 ? null : sb.toString();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /** Parsed LRC as native LyricsLine objects (line + milliseconds). */
     private static List<Object> buildSyncedLines(String synced) {
         List<Object> out = new ArrayList<Object>();
@@ -516,6 +596,126 @@ public final class LrclibFallback {
         t = PUNCT_RX.matcher(t).replaceAll(" ");
         t = SPACE_RX.matcher(t).replaceAll(" ").trim();
         return t;
+    }
+
+    // ================= localization =================
+
+    /**
+     * All user-visible strings added by this fallback, in every language
+     * the app ships (values=en, values-ar, values-fr). Runtime map —
+     * the extension adds no res/ resources, so native strings stay
+     * untouched and ours follow the device locale.
+     */
+    static String tr(String key) {
+        String lang = "";
+        try {
+            lang = Locale.getDefault().getLanguage();
+        } catch (Exception ignored) {
+        }
+        boolean ar = "ar".equalsIgnoreCase(lang);
+        boolean fr = "fr".equalsIgnoreCase(lang);
+
+        if ("no_result".equals(key)) {
+            if (ar) return "لم يتم العثور على كلمات.\nاضغط مطولاً على زر التشغيل للبحث يدوياً.";
+            if (fr) return "Paroles introuvables.\nAppui long sur le bouton lecture pour chercher manuellement.";
+            return "No lyrics found.\nLong-press the play button to search manually.";
+        }
+        if ("guide_teaser".equals(key)) {
+            if (ar) return "اضغط مطولاً على زر التشغيل لخيارات الكلمات.";
+            if (fr) return "Appui long sur le bouton lecture pour les options des paroles.";
+            return "Long-press the play button for lyrics options.";
+        }
+        if ("searching".equals(key)) {
+            if (ar) return "جارٍ البحث في LRCLIB…";
+            if (fr) return "Recherche sur LRCLIB…";
+            return "Searching LRCLIB…";
+        }
+        if ("no_loaded".equals(key)) {
+            if (ar) return "لا توجد كلمات بعد";
+            if (fr) return "Aucune parole chargée";
+            return "No lyrics loaded yet";
+        }
+        if ("no_fallback".equals(key)) {
+            if (ar) return "لا يوجد بديل لهذه الأغنية";
+            if (fr) return "Aucune alternative pour ce titre";
+            return "No fallback active for this song";
+        }
+        if ("hint_artist".equals(key)) {
+            if (ar) return "الفنان";
+            if (fr) return "Artiste";
+            return "Artist";
+        }
+        if ("hint_title".equals(key)) {
+            if (ar) return "العنوان";
+            if (fr) return "Titre";
+            return "Title";
+        }
+        if ("clear_cache".equals(key)) {
+            if (ar) return "مسح الكلمات المحفوظة";
+            if (fr) return "Effacer les paroles en cache";
+            return "Clear cached lyrics";
+        }
+        if ("search".equals(key)) {
+            if (ar) return "البحث في LRCLIB";
+            if (fr) return "Chercher sur LRCLIB";
+            return "Search LRCLIB";
+        }
+        if ("dialog_title".equals(key)) {
+            if (ar) return "مصدر الكلمات";
+            if (fr) return "Source des paroles";
+            return "Lyrics source";
+        }
+        if ("retry".equals(key)) {
+            if (ar) return "إعادة المحاولة";
+            if (fr) return "Réessayer";
+            return "Retry";
+        }
+        if ("show_plain".equals(key)) {
+            if (ar) return "عرض بدون توقيت";
+            if (fr) return "Afficher sans synchro";
+            return "Show plain";
+        }
+        if ("show_synced".equals(key)) {
+            if (ar) return "عرض بالتوقيت";
+            if (fr) return "Afficher synchronisé";
+            return "Show synced";
+        }
+        if ("server_version".equals(key)) {
+            if (ar) return "نسخة السيرفر";
+            if (fr) return "Version du serveur";
+            return "Server version";
+        }
+        if ("pick".equals(key)) {
+            if (ar) return "اختر الكلمات";
+            if (fr) return "Choisir les paroles";
+            return "Pick lyrics";
+        }
+        if ("no_results".equals(key)) {
+            if (ar) return "لا نتائج في LRCLIB";
+            if (fr) return "Aucun résultat LRCLIB";
+            return "No LRCLIB results";
+        }
+        if ("empty_record".equals(key)) {
+            if (ar) return "تسجيلة فارغة، اختر غيرها";
+            if (fr) return "Entrée vide, choisis-en une autre";
+            return "Empty record, pick another";
+        }
+        if ("no_match".equals(key)) {
+            if (ar) return "لا تطابق، نبقي الكلمات الحالية";
+            if (fr) return "Aucune correspondance, on garde les paroles actuelles";
+            return "No match, keeping current lyrics";
+        }
+        if ("cache_cleared".equals(key)) {
+            if (ar) return "تم مسح الكلمات المحفوظة";
+            if (fr) return "Paroles en cache effacées";
+            return "Cached lyrics cleared";
+        }
+        if ("instrumental".equals(key)) {
+            if (ar) return "موسيقية";
+            if (fr) return "Instrumental";
+            return "Instrumental";
+        }
+        return key;
     }
 
     // ================= cache =================
@@ -754,7 +954,7 @@ public final class LrclibFallback {
             Result r = new Result();
             r.queryUsed = queryUsed;
             r.source = source;
-            r.plain = "Instrumental";
+            r.plain = tr("instrumental");
             r.synced = null;
             return r;
         }
@@ -1077,7 +1277,7 @@ public final class LrclibFallback {
             synced = lastSynced;
         }
         if (song == null || callback == null) {
-            Toast.makeText(ctx, "No fallback active for this song", Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, tr("no_fallback"), Toast.LENGTH_SHORT).show();
             return;
         }
         SongInfo info;
@@ -1105,38 +1305,41 @@ public final class LrclibFallback {
         int pad = (int) (16 * ctx.getResources().getDisplayMetrics().density);
         layout.setPadding(pad, pad / 2, pad, 0);
         final EditText artistEdit = new EditText(ctx);
-        artistEdit.setHint("Artist");
+        artistEdit.setHint(tr("hint_artist"));
         artistEdit.setText(info.artist);
         final EditText titleEdit = new EditText(ctx);
-        titleEdit.setHint("Title");
+        titleEdit.setHint(tr("hint_title"));
         titleEdit.setText(info.title);
         layout.addView(artistEdit);
         layout.addView(titleEdit);
         final android.widget.Button clearBtn = new android.widget.Button(ctx);
-        clearBtn.setText("Clear cached lyrics");
+        clearBtn.setText(tr("clear_cache"));
         layout.addView(clearBtn);
         final android.widget.Button searchBtn = new android.widget.Button(ctx);
-        searchBtn.setText("Search LRCLIB");
+        searchBtn.setText(tr("search"));
         layout.addView(searchBtn);
 
         AlertDialog.Builder b = new AlertDialog.Builder(ctx);
-        b.setTitle("Lyrics source");
+        b.setTitle(tr("dialog_title"));
         b.setView(layout);
-        b.setPositiveButton("Retry", null); // overridden below to avoid auto-dismiss.
+        b.setPositiveButton(tr("retry"), null); // overridden below to avoid auto-dismiss.
         if (fresh && plain != null && synced != null
                 && !plain.isEmpty() && !synced.isEmpty()) {
-            b.setNeutralButton(lastPreferSynced ? "Show plain" : "Show synced", null);
+            b.setNeutralButton(lastPreferSynced ? tr("show_plain") : tr("show_synced"), null);
         }
         if (fresh) {
-            b.setNegativeButton("Server version", null);
+            b.setNegativeButton(tr("server_version"), null);
         }
         final AlertDialog dialog = b.create();
         dialog.show();
         searchBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                final String a = artistEdit.getText().toString().trim();
-                final String t = titleEdit.getText().toString().trim();
+                // Lowercased: LRCLIB matching is case-sensitive enough
+                // that mixed-case artist/title variants miss; normalize()
+                // lowercases too, this keeps the dialog path explicit.
+                final String a = artistEdit.getText().toString().trim().toLowerCase(Locale.ROOT);
+                final String t = titleEdit.getText().toString().trim().toLowerCase(Locale.ROOT);
                 if (a.isEmpty() && t.isEmpty()) return;
                 dialog.dismiss();
                 final Context c = v.getContext();
@@ -1149,7 +1352,7 @@ public final class LrclibFallback {
                             @Override
                             public void run() {
                                 if (found.isEmpty()) {
-                                    Toast.makeText(c, "No LRCLIB results",
+                                    Toast.makeText(c, tr("no_results"),
                                             Toast.LENGTH_SHORT).show();
                                     return;
                                 }
@@ -1158,7 +1361,7 @@ public final class LrclibFallback {
                                     labels[i] = candidateLabel(found.get(i));
                                 }
                                 new AlertDialog.Builder(c)
-                                        .setTitle("Pick lyrics")
+                                        .setTitle(tr("pick"))
                                         .setItems(labels, new android.content.DialogInterface.OnClickListener() {
                                             @Override
                                             public void onClick(android.content.DialogInterface d, int which) {
@@ -1172,7 +1375,7 @@ public final class LrclibFallback {
                                                             new Handler(Looper.getMainLooper()).post(new Runnable() {
                                                                 @Override
                                                                 public void run() {
-                                                                    Toast.makeText(c, "Empty record, pick another",
+                                                                    Toast.makeText(c, tr("empty_record"),
                                                                             Toast.LENGTH_SHORT).show();
                                                                 }
                                                             });
@@ -1206,7 +1409,7 @@ public final class LrclibFallback {
                 try {
                     Context c = v.getContext();
                     prefs(c).edit().clear().apply();
-                    Toast.makeText(c, "Cached lyrics cleared", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(c, tr("cache_cleared"), Toast.LENGTH_SHORT).show();
                     Log.d(TAG, "fallback cache cleared by user");
                 } catch (Throwable t) {
                     Log.d(TAG, "clear cache failed: " + t);
@@ -1218,8 +1421,8 @@ public final class LrclibFallback {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    final String a = artistEdit.getText().toString().trim();
-                    final String t = titleEdit.getText().toString().trim();
+                    final String a = artistEdit.getText().toString().trim().toLowerCase(Locale.ROOT);
+                    final String t = titleEdit.getText().toString().trim().toLowerCase(Locale.ROOT);
                     if (a.isEmpty() || t.isEmpty()) return;
                     dialog.dismiss();
                     final Context c = v.getContext();
@@ -1244,7 +1447,7 @@ public final class LrclibFallback {
                                 new Handler(Looper.getMainLooper()).post(new Runnable() {
                                     @Override
                                     public void run() {
-                                        Toast.makeText(c, "No match, keeping current lyrics",
+                                        Toast.makeText(c, tr("no_match"),
                                                 Toast.LENGTH_SHORT).show();
                                     }
                                 });
