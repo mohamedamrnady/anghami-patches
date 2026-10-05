@@ -50,6 +50,25 @@ object LyricsSuccessFingerprint : Fingerprint(
 )
 
 /**
+ * `com.anghami.ui.view.A.h(Z)`: the lyrics-view load entry. With
+ * `update=true` it goes straight to the API (`i()`); otherwise it first
+ * tries the native StoredLyrics DB (`A7/D`) and falls back to the API on
+ * miss (`c()` -> `i()`). Anchor for the instant-cached-paint insert at
+ * entry — a miss is a no-op and native proceeds untouched. No
+ * accessFlags (class + name + signature + content pin it).
+ */
+object LyricsViewLoadFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/ui/view/A;",
+    name = "h",
+    returnType = "V",
+    parameters = listOf("Z"),
+    filters = listOf(
+        string("loadLyrics: update = "),
+        string("loadLyricsListForSong() called with: song = "),
+    )
+)
+
+/**
  * `PlayerFragment.W0(Song)`: the per-song lyrics-button gate. Renders the
  * button enabled (alpha 1.0) only when `Song.hasLyrics` is true and automix
  * is off; otherwise alpha 0.3 + `setEnabled(false)` on the button and its

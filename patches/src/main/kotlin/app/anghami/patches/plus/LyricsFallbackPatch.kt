@@ -35,6 +35,13 @@ private const val FALLBACK_HELPER =
  * is untouched). The fallback itself still only renders on truncated/empty
  * server responses.
  *
+ * Truncated suppression: once LRCLIB lyrics are cached for a song, later
+ * opens never show the teaser again. The view-load hook paints the cache
+ * instantly; the `A7/E.b`-entry hook rewrites the truncated API response
+ * in place before native renders it; the onNext hook then re-flags it
+ * truncated so native saveLyrics keeps refusing it (prefs cache stays
+ * the only source of truth, manual picks keep sticking).
+ *
  * Patch-authoring rules honored: all trampolines are branch-free inserts
  * (entry prepends use only dead-at-entry v0, or p1 alone; the a1 insert
  * reuses the I0() result register). No new labels, no register growth.
@@ -80,6 +87,30 @@ val lyricsFallbackPatch = bytecodePatch(
                 iget-object v0, p0, LA7/F;->a:Lcom/anghami/ghost/pojo/Song;
                 iget-object v1, p0, LA7/F;->b:Ljava/lang/Object;
                 invoke-static {v0, p1, v1}, $FALLBACK_HELPER->maybeFetch(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)V
+            """
+        )
+        // Truncated suppression at the render choke point (`A7/E.b`
+        // entry): a cached LRCLIB result rewrites the truncated/empty
+        // response in place before native renders it, so the teaser is
+        // never shown on first open or revisit. Branch-free prepend
+        // (v0-v2 dead at entry of this static method); all decisions
+        // live in the helper, misses are no-ops.
+        LyricsSuccessFingerprint.method.addInstructions(
+            0,
+            """
+                move-object v0, p0
+                move-object v1, p1
+                move-object v2, p3
+                invoke-static {v0, v1, v2}, $FALLBACK_HELPER->substituteCached(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)V
+            """
+        )
+        // Instant cached paint at lyrics-view load (`A.h` entry):
+        // known songs render immediately without waiting for the
+        // DB/API round-trip. Branch-free (p0 alone, no v-reg touched).
+        LyricsViewLoadFingerprint.method.addInstructions(
+            0,
+            """
+                invoke-static {p0}, $FALLBACK_HELPER->paintCached(Ljava/lang/Object;)V
             """
         )
         // Player lyrics button: the Song arrives with server hasLyrics=false

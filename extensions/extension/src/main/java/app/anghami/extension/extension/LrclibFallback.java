@@ -40,6 +40,13 @@ import java.util.regex.Pattern;
  *   renders) renders full LRCLIB lyrics when the server response is
  *   truncated or empty. Full native responses return early, so the
  *   Plus/native path is untouched.
+ * - {@link #substituteCached} (from {@code A7/E.b} entry) rewrites a
+ *   truncated/empty response in place with cached LRCLIB lyrics before
+ *   native renders it — the teaser is never shown, on first open or
+ *   revisit. {@link #impl} re-flags such responses truncated afterwards
+ *   so native saveLyrics keeps refusing them.
+ * - {@link #paintCached} (from the lyrics-view load) paints cached lyrics
+ *   instantly without waiting for the DB/API round-trip.
  * - {@link #showLyricsOptions} (from the play/pause long-press) opens the
  *   options dialog for the current song.
  *
@@ -126,6 +133,11 @@ public final class LrclibFallback {
     private static void impl(Object songObj, Object responseObj, Object callbackObj) {
         try {
             if (songObj == null || callbackObj == null) return;
+            // Already served via substituteCached (E.b entry rewrote this
+            // response pre-render): re-flag truncated so the native
+            // saveLyrics flow keeps refusing it, then stop. StoredLyrics
+            // is never written; our prefs cache stays the only source.
+            if (unmarkSubstituted(responseObj)) return;
             boolean serverEmpty = true;
             if (responseObj != null) {
                 if (isFullNativeResponse(responseObj)) return; // Plus/native path: untouched.
@@ -146,12 +158,7 @@ public final class LrclibFallback {
             }
 
             final String key = cacheKey(song);
-            Cached hit = readCache(ctx, key);
-            if (hit == null) {
-                // Migration: entries written before the id-primary key.
-                String legacy = legacyCacheKey(song);
-                if (!legacy.equals(key)) hit = readCache(ctx, legacy);
-            }
+            Cached hit = lookupCache(ctx, song, key);
             if (hit != null) {
                 if (hit.miss) {
                     Log.d(TAG, "negative cache hit, keeping server view for songId=" + song.id);
@@ -236,6 +243,163 @@ public final class LrclibFallback {
         } catch (Throwable t) {
             Log.d(TAG, "showLyricsOptions failed: " + t);
         }
+    }
+
+    // ================= truncated suppression =================
+
+    /**
+     * Responses rewritten by {@link #substituteCached} (identity set).
+     * {@link #impl} re-flags them truncated so native saveLyrics keeps
+     * refusing them.
+     */
+    private static final java.util.Set<Object> substituted =
+            java.util.Collections.newSetFromMap(
+                    new java.util.WeakHashMap<Object, Boolean>());
+
+    /** ID-primary lookup with legacy-key fallback (pre-id-key entries). */
+    private static Cached lookupCache(Context ctx, SongInfo song, String key) {
+        Cached hit = readCache(ctx, key);
+        if (hit == null) {
+            String legacy = legacyCacheKey(song);
+            if (!legacy.equals(key)) hit = readCache(ctx, legacy);
+        }
+        return hit;
+    }
+
+    private static boolean hasUsableLyrics(Cached hit) {
+        return hit != null && !hit.miss
+                && ((hit.plain != null && !hit.plain.isEmpty())
+                || (hit.synced != null && !hit.synced.isEmpty()));
+    }
+
+    /**
+     * {@code A7/E.b} entry: when the server response is truncated/empty
+     * and we already hold LRCLIB lyrics for this song, rewrite the
+     * response in place BEFORE native renders it — the teaser is never
+     * shown in any way, on first open or revisit. Full native/Plus
+     * responses and cache misses are untouched. All decisions live here
+     * so the trampoline stays a branch-free static call.
+     */
+    public static void substituteCached(Object songObj, Object responseObj, Object callbackObj) {
+        try {
+            if (songObj == null || responseObj == null || callbackObj == null) return;
+            if (isFullNativeResponse(responseObj)) return;
+            Context ctx = appContextOf(callbackObj);
+            if (ctx == null) return;
+            SongInfo song = readSong(songObj);
+            if (song == null || song.id.isEmpty()) return;
+            Cached hit = lookupCache(ctx, song, cacheKey(song));
+            if (!hasUsableLyrics(hit)) return;
+            boolean wantSynced = lastPreferSynced && hit.synced != null && !hit.synced.isEmpty();
+            if (!wantSynced && (hit.plain == null || hit.plain.isEmpty()) && hit.synced != null) {
+                wantSynced = true; // only synced available.
+            }
+            if (wantSynced) {
+                List<Object> lines = buildSyncedLines(hit.synced);
+                if (lines.isEmpty()) {
+                    if (hit.plain == null || hit.plain.isEmpty()) return;
+                    wantSynced = false;
+                } else {
+                    setLineField(responseObj, "lyricsSynced", lines);
+                    setLineField(responseObj, "lyricsUnsynced", null);
+                    setLineField(responseObj, "isSynced", true);
+                }
+            }
+            if (!wantSynced) {
+                setLineField(responseObj, "lyricsSynced", null);
+                setLineField(responseObj, "lyricsUnsynced", hit.plain);
+                setLineField(responseObj, "isSynced", false);
+            }
+            setLineField(responseObj, "truncated", false);
+            remember(hit.queryUsed, hit.source, hit.plain, hit.synced);
+            synchronized (LrclibFallback.class) {
+                lastSong = songObj;
+                lastCallback = callbackObj;
+                lastOriginalResponse = responseObj;
+                substituted.add(responseObj);
+            }
+            Log.d(TAG, "substituted cached (" + hit.queryUsed + ")");
+        } catch (Throwable t) {
+            Log.d(TAG, "substituteCached failed: " + t);
+        }
+    }
+
+    /**
+     * Lyrics-view load entry ({@code com.anghami.ui.view.A.h}): paints
+     * cached LRCLIB lyrics instantly without waiting for the DB/API
+     * round-trip. Miss = no-op, native proceeds. The later API response
+     * is rewritten to the same content by {@link #substituteCached}, so
+     * there is no visible change when it lands.
+     */
+    public static void paintCached(Object viewObj) {
+        try {
+            if (!(viewObj instanceof View)) return;
+            final View view = (View) viewObj;
+            final Context ctx = view.getContext();
+            if (ctx == null) return;
+            final Object songObj;
+            try {
+                songObj = getFieldUp(viewObj, "c");
+            } catch (Exception e) {
+                return;
+            }
+            if (songObj == null) return;
+            SongInfo song = readSong(songObj);
+            if (song == null || song.id.isEmpty()) return;
+            Cached hit = lookupCache(ctx, song, cacheKey(song));
+            if (!hasUsableLyrics(hit)) return;
+            remember(hit.queryUsed, hit.source, hit.plain, hit.synced);
+            synchronized (LrclibFallback.class) {
+                lastSong = songObj;
+                lastCallback = viewObj;
+                lastOriginalResponse = null;
+            }
+            renderOnMain(ctx, songObj, viewObj, hit.plain, hit.synced,
+                    hit.queryUsed + " early", true);
+        } catch (Throwable t) {
+            Log.d(TAG, "paintCached failed: " + t);
+        }
+    }
+
+    /**
+     * True when this response was rewritten by {@link #substituteCached}.
+     * Re-flags it truncated so native saveLyrics refuses it (our prefs
+     * cache stays the only source of truth), so the caller can stop.
+     */
+    private static boolean unmarkSubstituted(Object responseObj) {
+        try {
+            if (responseObj == null) return false;
+            boolean mine;
+            synchronized (LrclibFallback.class) {
+                mine = substituted.remove(responseObj);
+            }
+            if (!mine) return false;
+            Field f = fieldUp(responseObj.getClass(), "truncated");
+            if (f != null && f.getType() == Boolean.TYPE) f.setBoolean(responseObj, true);
+            Log.d(TAG, "substituted response unmarked (save skipped)");
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Parsed LRC as native LyricsLine objects (line + milliseconds). */
+    private static List<Object> buildSyncedLines(String synced) {
+        List<Object> out = new ArrayList<Object>();
+        try {
+            List<Line> parsed = parseLrc(synced);
+            if (parsed.isEmpty()) return out;
+            Class<?> lc = Class.forName("com.anghami.ghost.pojo.LyricsLine");
+            for (Line l : parsed) {
+                Object o = lc.newInstance();
+                setLineField(o, "line", l.text);
+                setLineField(o, "milliseconds", l.ms);
+                out.add(o);
+            }
+        } catch (Throwable t) {
+            Log.d(TAG, "buildSyncedLines failed: " + t);
+        }
+        return out;
     }
 
     // ================= response inspection =================
