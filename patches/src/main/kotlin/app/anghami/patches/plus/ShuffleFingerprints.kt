@@ -188,3 +188,72 @@ object SetShuffleModeFingerprint : Fingerprint(
         string("PlayQueue: setShuffleMode() called isShuffleMode : "),
     )
 )
+
+/**
+ * Fresh-queue builders where the remembered mode is applied (Anghami 8.0.28,
+ * verified in Anghami 8.0.28). The sync-point readers never see these queues
+ * (built locally, mode default false), so each tail calls public
+ * `setShuffle(sticky)` — a no-op when sticky=false, a flag flip (+ server
+ * echo completing the order) when sticky=true:
+ * - `c.createPlayQueue(...)` (single `return-object v0`, label-free; v0 =
+ *   queue, v1 dead): covers `getPagePlayQueue` and `getPlayQueueFromSection`
+ *   on-demand paths (P5/f, t4/d presenters inherit via super.play).
+ * - `c.buildRelatedPlayQueue(...)` (single `return-object v2`, label-free;
+ *   v2 = SongPlayqueue, v0 dead): covers related-queue taps. Its own p3
+ *   gate calls `setIsHeader()`, never `shuffle()` — not a force path.
+ * - `k5/f$a.onNext(Object)` (async Generic funnel; label-free
+ *   `iget-boolean p1, f$a;->c` pre-gate; v0 = queue, p1 dead until the
+ *   stock iget): runs before the user shuffle gate and playPlayQueue.
+ * Radio/Automix queues are built elsewhere and deliberately untouched.
+ */
+object CreatePlayQueueFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/app/base/list_fragment/c;",
+    name = "createPlayQueue",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "Lcom/anghami/odin/playqueue/PlayQueue;",
+    parameters = listOf(
+        "Ljava/util/List;",
+        "I",
+        "Lcom/anghami/ghost/pojo/section/Section;",
+        "Lcom/anghami/data/remote/proto/SiloPlayQueueProto\$PlayQueuePayload;",
+    ),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/odin/playqueue/PlayQueue;",
+            name = "fillSectionData",
+        ),
+    )
+)
+
+object RelatedQueueBuilderFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/app/base/list_fragment/c;",
+    name = "buildRelatedPlayQueue",
+    // NOTE: no accessFlags (private in 8.0.28; exact-int matching brittle).
+    returnType = "Lcom/anghami/odin/playqueue/PlayQueue;",
+    parameters = listOf(
+        "Lcom/anghami/ghost/pojo/Song;",
+        "Lcom/anghami/ghost/pojo/section/Section;",
+        "Z",
+        "Ljava/lang/String;",
+    ),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/odin/playqueue/PlayQueue;",
+            name = "setIsHeader",
+        ),
+    )
+)
+
+object GenericQueueBuilderFingerprint : Fingerprint(
+    definingClass = "Lk5/f\$a;",
+    name = "onNext",
+    // NOTE: no accessFlags; class + name + signature pin it.
+    returnType = "V",
+    parameters = listOf("Ljava/lang/Object;"),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/odin/playqueue/PlayQueueManager;",
+            name = "playPlayQueue",
+        ),
+    )
+)
