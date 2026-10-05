@@ -42,26 +42,21 @@ private const val HEADER_BUTTON_TYPE =
  *
  * Net: every playlist/album header shows [Play] + [Shuffle]. Taps flow
  * through the stock click funnel (`onHeaderButtonClicked` ->
- * `onPlayButtonClick` / `onShuffleButtonClick`), so each tap also sets the
- * remembered shuffle choice (writers below):
- * - Play (`onPlayButtonClick` -> `playFromHeader(false, ...)`) records
- *   shuffle OFF: the queue starts in order, and the remembered choice is
- *   reset so a later tap-a-song also starts in order.
- * - Shuffle (`_onShuffleButtonClick` -> `playFromHeader(true, ...)`) records
- *   shuffle ON: the queue is really shuffled, and tap-a-song follows it.
+ * `onPlayButtonClick` / `onShuffleButtonClick`): Play starts the queue in
+ * order, Shuffle really shuffles it (stock `shuffle()` is left live by the
+ * "Unforce shuffle" patch this depends on).
  *
- * The click hooks are index-0 `const/4` + `sput-boolean` prepends (v0 is
- * dead at entry in both methods, verified in Anghami 8.0.28).
  * Edit/Follow/Like stay reachable from the 3-dot menu
  * (`onHeaderButtonClicked` + follow handlers are untouched).
  *
- * Depends on "Unforce shuffle", which owns the sticky field and applies it
- * at the sync points; enabling this pulls that in automatically.
+ * Depends on "Unforce shuffle" (server-forced shuffle stays off, so the
+ * explicit taps are the only shuffle source); enabling this pulls that in
+ * automatically.
  */
 @Suppress("unused")
 val headerShufflePatch = bytecodePatch(
     name = "Header Play + Shuffle",
-    description = "Playlist/album headers show Play + Shuffle instead of Shuffle + Edit/Follow/Like (functional LEAVECOLLAB, local-songs ADD_MORE and podcasts untouched). Each tap also sets the remembered shuffle choice. Pulls in 'Unforce shuffle'.",
+    description = "Playlist/album headers show Play + Shuffle instead of Shuffle + Edit/Follow/Like (functional LEAVECOLLAB, local-songs ADD_MORE and podcasts untouched). Pulls in 'Unforce shuffle'.",
     default = true,
 ) {
     compatibleWith(COMPATIBILITY_ANGHAMI_8_0_28)
@@ -318,22 +313,6 @@ val headerShufflePatch = bytecodePatch(
                 sget-object v0, $HEADER_BUTTON_TYPE->SHUFFLE:$HEADER_BUTTON_TYPE
                 :keep_playlist_secondary
                 return-object v0
-            """
-        )
-        // --- Sticky writers (unchanged): Play records OFF... ---
-        PlayHeaderClickFingerprint.method.addInstructions(
-            0,
-            """
-                const/4 v0, 0x0
-                sput-boolean v0, $STICKY_SHUFFLE_HOLDER->$STICKY_SHUFFLE_FIELD:Z
-            """
-        )
-        // --- ...Shuffle (playlist + album choke point) records ON. ---
-        ShuffleHeaderClickFingerprint.method.addInstructions(
-            0,
-            """
-                const/4 v0, 0x1
-                sput-boolean v0, $STICKY_SHUFFLE_HOLDER->$STICKY_SHUFFLE_FIELD:Z
             """
         )
     }

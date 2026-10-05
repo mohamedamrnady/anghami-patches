@@ -1,7 +1,6 @@
 package app.anghami.patches.plus
 
 import app.morphe.patcher.Fingerprint
-import app.morphe.patcher.fieldAccess
 import app.morphe.patcher.methodCall
 import app.morphe.patcher.opcode
 import app.morphe.patcher.string
@@ -110,6 +109,69 @@ object ShouldPlayRadioFingerprint : Fingerprint(
     ),
     filters = listOf(
         string("shuffle"),
+    )
+)
+
+/**
+ * Tap/header -> related-queue redirect (Anghami 8.0.28, verified in Anghami 8.0.28
+ * list_fragment/c:1833, sole private definition — P5/f, t4/d,
+ * k5/f all inherit it).
+ *
+ * `shouldPlayRelated(songs, section)` returns true whenever the SERVER marks
+ * content as related (`section.playMode=="related"` or the first song's
+ * `playMode=="related"`), or for single-song sections when
+ * `canPlaySingleSong()` is false. Both callers (`getPagePlayQueue`,
+ * `getPlayQueueFromSection` — i.e. header Play AND tap-a-song) then build a
+ * `SongPlayqueue` that the server expands with related songs instead of the
+ * on-demand queue, so tapping e.g. a queue-screen recommendation or a
+ * related-marked row "sometimes enables the radio shit" (2026-10-05).
+ * (`shouldForceRelatedMode` inside is already dead via the Unlock patch's
+ * `skipLimitReached=false`; the live triggers are the server markings.)
+ * Forcing false keeps the `createPlayQueue(songs, index)` on-demand path
+ * everywhere. `playMode=="infinite"` sections already returned false in
+ * stock and are unaffected.
+ */
+object ShouldPlayRelatedFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/app/base/list_fragment/c;",
+    name = "shouldPlayRelated",
+    // NOTE: no accessFlags (private in 8.0.28; exact-int matching brittle).
+    returnType = "Z",
+    parameters = listOf(
+        "Ljava/util/List;",
+        "Lcom/anghami/ghost/pojo/section/Section;",
+    ),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/odin/playqueue/PlayQueueManager;",
+            name = "shouldForceRelatedMode",
+        ),
+    )
+)
+
+/**
+ * Queue-expansion entry (Anghami 8.0.28, verified in Anghami 8.0.28:
+ * PlayQueue:10706, sole definition — all subclasses inherit it).
+ *
+ * `maybeExpandQueue` serves TWO uses: initial data load for queues built
+ * with an empty song list (e.g. `getAndPlaySearchSongPlayQueue` builds a
+ * `SongPlayqueue`, removes the song, then loads it via expansion — kill
+ * that and search taps break), and near-end top-ups that APPEND
+ * server-picked songs to a playing queue (the skip-pollution vector:
+ * `SongPlayqueue` fetches related by songId+extras, `RadioPlayQueue` is
+ * endlessly expandable). The patch allows the former and blocks the
+ * latter: non-empty song/radio-typed queues fail fast, everything else
+ * (including empty queues and normal playlist continuation) proceeds.
+ */
+object QueueExpansionFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/odin/playqueue/PlayQueue;",
+    name = "maybeExpandQueue",
+    accessFlags = listOf(AccessFlags.PUBLIC),
+    returnType = "V",
+    parameters = listOf(
+        "Lcom/anghami/odin/playqueue/PlayQueue\$ExpansionCallback;",
+    ),
+    filters = listOf(
+        string("ShouldExpandQueue returns false"),
     )
 )
 
