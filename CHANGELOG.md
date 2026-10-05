@@ -1,3 +1,13 @@
+## [1.3.0-dev.2](https://github.com/mohamedamrnady/anghami-patches/compare/v1.3.0-dev.1...v1.3.0-dev.2) (2026-10-05)
+
+### 🐛 Bug Fixes
+
+* tap-a-song skip — socket pinned false, creation appliers removed ([b541cbc](https://github.com/mohamedamrnady/anghami-patches/commit/b541cbc6e288fd46987bc91d594bb8d907f8f4a0))
+
+### ✨ New Features
+
+* LRCLIB lyrics fallback with long-press options ([7ca1c17](https://github.com/mohamedamrnady/anghami-patches/commit/7ca1c178bf4b93dfdae25cc6a3902a687593a129))
+
 ## [1.3.0-dev.1](https://github.com/mohamedamrnady/anghami-patches/compare/v1.2.0...v1.3.0-dev.1) (2026-10-04)
 
 ### ✨ New Features
