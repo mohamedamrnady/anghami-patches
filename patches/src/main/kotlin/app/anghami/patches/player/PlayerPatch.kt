@@ -5,69 +5,73 @@ import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.extensions.InstructionExtensions.removeInstruction
 import app.morphe.patcher.extensions.InstructionExtensions.replaceInstructions
 import app.morphe.patcher.patch.bytecodePatch
+import app.morphe.patcher.util.proxy.mutableTypes.MutableField
 import com.android.tools.smali.dexlib2.Opcode
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
-import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction22c
 import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction31i
-import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+import com.android.tools.smali.dexlib2.immutable.ImmutableField
+
+private const val NIGHT_GATE_HOLDER = "Lcom/anghami/player/ui/l;"
+private const val NIGHT_TEXT_FIELD = "playerNightText"
+private const val NIGHT_BG_FIELD = "playerNightBg"
+private const val NIGHT_HL_FIELD = "playerNightHl"
+private const val NIGHT_RM_FIELD = "playerNightRm"
+private const val NIGHT_WASH_FIELD = "playerNightWash"
 
 /**
  * Player theme (single toggle): all player bytecode work in one patch.
  *
- * This merges the four former player bytecode patches (cover-art tint
- * removal, readable queue rows, accent now-playing + pills, action icons)
- * so the player is one on/off switch. It `dependsOn` the "Player theme
- * background" resource patch, which carries the day/night roles and layout
- * rewrites — enabling this patch pulls that one in automatically. (A single
- * Patch object cannot cover both dex and resources: morphe-patcher 1.14.1
- * exposes only `bytecodePatch` / `resourcePatch` / `rawResourcePatch`, and
- * `BytecodePatchContext` has no resource access.)
+ * Night mode only. In day (light) mode the player is stock: the cover-art
+ * tint runs untouched and every chrome/queue/highlight color below keeps
+ * its stock value — the original player experience. At night the patch
+ * removes the tint and recolors the player with the primary accent. It
+ * `dependsOn` the "Player theme background" resource patch, whose day
+ * roles resolve to the stock dark-player values, so the shared layouts
+ * render stock in day and themed at night with no layout branching.
+ * (A single Patch object cannot cover both dex and resources:
+ * morphe-patcher 1.14.1 exposes only `bytecodePatch` / `resourcePatch` /
+ * `rawResourcePatch`, and `BytecodePatchContext` has no resource access.)
  *
- * What it does (const swaps + index-0 prepends, no mid-method branches):
+ * How the night-gating works (no mid-method branches anywhere):
  *
- * 1. Cover-art tint removal (`player/ui/l.L0()`): the player's background
- *    is coloured from the current song in exactly one place — `Song.hexColor`
- *    (server per-song hex) into `g9/i.s(...)`, falling back to the dominant
- *    cover-bitmap colour, ending at `view.setBackgroundColor` on the
- *    `layout_player` root. The `g9/i.s(...)` range-invoke + its
- *    `move-result-object` become `const/4 v0, 0x0`, so the colour is never
- *    computed and never applied. Hooked in `L0()`, not in `g9/i.s`, because
- *    `g9/i.s` has a second caller (`V5/c`) that must keep its theming; ad
- *    pages (`F8/n`, `F8/Y`) force their own black root and are untouched.
- *    Lesson: `invoke-static/range` is dex format 3rc, not 35c — match via
- *    `ReferenceInstruction`, never a 35c cast.
- * 2. Readable queue in day mode: `RowModel$RowViewHolder.inverseColors()`
- *    returns early in day mode (night falls through to stock white), and
- *    `RowModel._bind()` forces `isInverseColors=false` in day mode — the
- *    bind chain re-reads that field on every bind and `SongRowModel._bind`
- *    calls `super` first, so one write fixes every downstream paint.
- * 3. Accent now-playing + pills: `playerfeed/c.m0` white pill text/icon
- *    const -> `primaryText`, grey wash bg -> `window_background_color`;
- *    `setSongHighlight` near-black `dark_3` -> `app_color` (title, subtitle,
- *    icons, equalizer, video badge; the equalizer self-resolves the res id,
- *    so the const swap already recolors its bars); unselected-row
- *    `app_color` -> `primaryText` so only the playing row carries the
- *    accent; the `#b3ffffff` row wash is zeroed to transparent.
- * 4. Action icons: `AnimatedShareView.<init>` resolves `primaryText` once
- *    and sets both hardcoded-white paints branch-free at ctor end; the
- *    like/download lotties get the accent `KeyPath("**")` filter
- *    re-registered after every animation set (`player/ui/j.c`,
- *    `player/ui/i.i/j`) because the XML `app:lottie_colorFilter` only
- *    sticks to the first composition (`app:tint`/`setColorFilter` are
- *    no-ops on LottieDrawable).
+ * - Cover-art tint (`player/ui/l.L0()`): an index-0 uiMode prepend. Day
+ *   jumps over the stub to the stock tint path; night falls into the stub,
+ *   which disposes the old tint, clears the cell and returns before the
+ *   `g9/i.s(...)` call. Hooked in
+ *   `L0()`, not in `g9/i.s`, because `g9/i.s` has a second caller
+ *   (`V5/c`) that must keep its theming; ad pages (`F8/n`, `F8/Y`) force
+ *   their own black root and are untouched. Lesson: `invoke-static/range`
+ *   is dex format 3rc, not 35c — match via `ReferenceInstruction`, never
+ *   a 35c cast.
+ * - Pill/highlight consts (`playerfeed/c.m0`, `setSongHighlight`,
+ *   `removeSongHighlight`): the stock color IDs are replaced with `sget`s
+ *   of static int fields on the player fragment. Each hosting method
+ *   computes day/night at entry (label-free uiMode arithmetic, registers
+ *   dead at index 0) and `sput`s the right ID, so the mid-method swap is
+ *   a single branch-free instruction. The highlight wash keeps its
+ *   getColor-stripping shape, but the zeroed const is now a mode-aware
+ *   color int (stock wash in day, transparent at night).
+ * - Action icons (`AnimatedShareView.<init>`, lottie funnels
+ *   `player/ui/j.c`, `player/ui/i.i/j`): the appended blocks resolve the
+ *   night color and select white in day with branch-free arithmetic
+ *   (day white is the literal -0x1, no second lookup), so the appends
+ *   stay label-free at the method exits.
+ * - Queue rows: stock in both modes (white inverse rows on the dark
+ *   backgrounds). No hooks.
  *
  * Label discipline (Morphe bug that cost a device round trip): inserted
  * label references assemble to chunk-relative offsets — correct only at
  * method index 0, silently corrupt anywhere else (proven with `dexdump`:
  * a branch at dex pc `0x39C` targeted `0x1D`, `VerifyError` on launch).
- * New branches only at index 0; mid/end-method code must be branch-free.
- * All touched methods were validated with `dexdump` before install.
+ * The L0 stub is the only inserted branch and sits at index 0; everything
+ * else is branch-free. All touched methods were validated with `dexdump`
+ * before install.
  */
 @Suppress("unused")
 val playerPatch = bytecodePatch(
     name = "Player theme",
-    description = "Player theme in one toggle: removes the cover-art tint, keeps the queue readable in day mode, and paints the now-playing row, pills and action icons with the primary accent. Pulls in 'Player theme background' resources.",
+    description = "Night-only player theme: removes the cover-art tint and paints the now-playing row, pills and action icons with the primary accent at night; day mode keeps the stock tinted player. Pulls in 'Player theme background' resources.",
     default = false,
 ) {
     compatibleWith(COMPATIBILITY_ANGHAMI_8_0_28)
@@ -75,46 +79,43 @@ val playerPatch = bytecodePatch(
     dependsOn(playerThemePatch)
 
     execute {
-        // --- 1. Cover-art tint: drop the g9/i.s range-invoke. ---
-        val l0 = PlayerCoverTintFingerprint.method
-        val l0Instructions = l0.implementation!!.instructions
-        // `invoke-static/range` is dex format 3rc, NOT 35c — a 35c cast
-        // silently yields nothing here. ReferenceInstruction covers both.
-        val g9Calls = l0Instructions.mapIndexedNotNull { index, ins ->
-            val reference = (ins as? ReferenceInstruction)?.reference as? MethodReference
-            if (reference?.definingClass == "Lg9/i;") {
-                index to "${ins.opcode} ${reference.name}(" +
-                    reference.parameterTypes.joinToString("") + ")"
-            } else {
-                null
+        // --- 0. Night-gate cells (must exist before any sput/sget refs). ---
+        val holder = mutableClassDefBy(NIGHT_GATE_HOLDER)
+        for (name in listOf(
+            NIGHT_TEXT_FIELD,
+            NIGHT_BG_FIELD,
+            NIGHT_HL_FIELD,
+            NIGHT_RM_FIELD,
+            NIGHT_WASH_FIELD,
+        )) {
+            check(holder.staticFields.none { it.name == name }) {
+                "night-gate field $name already present on $NIGHT_GATE_HOLDER"
             }
+            holder.staticFields.add(
+                MutableField(
+                    ImmutableField(
+                        NIGHT_GATE_HOLDER,
+                        name,
+                        "I",
+                        0x9, // PUBLIC | STATIC
+                        null,
+                        emptyList(),
+                        emptySet(),
+                    ),
+                ),
+            )
         }
-        val tintCalls = g9Calls.filter { it.second.startsWith("INVOKE_STATIC_RANGE s(") }
-        check(tintCalls.size == 1) {
-            "expected exactly 1 g9/i.s range-invoke in PlayerFragment.L0, found ${tintCalls.size}; g9/i calls: $g9Calls"
-        }
-        val callIndex = tintCalls[0].first
-        check(l0Instructions[callIndex + 1].opcode == Opcode.MOVE_RESULT_OBJECT) {
-            "expected move-result-object after g9/i.s, found ${l0Instructions[callIndex + 1].opcode}"
-        }
-        // Drop the trailing instruction first so the call index stays valid.
-        l0.removeInstruction(callIndex + 1)
-        l0.replaceInstructions(callIndex, "const/4 v0, 0x0")
 
-        // --- 2. Readable queue rows in day mode (index-0 prepends). ---
-        val inverse = QueueRowInverseFingerprint.method
-        val inverseInstructions = inverse.implementation!!.instructions
-        // Sanity: the method must start with the itemView iget, i.e. all
-        // of v0-v2 are dead at index 0 and safe to clobber.
-        val first = inverseInstructions[0]
-        check(first.opcode == Opcode.IGET_OBJECT && first is Instruction22c &&
-            (first.reference as? FieldReference)?.name == "itemView") {
-            "RowModel\$RowViewHolder.inverseColors does not start with the itemView iget; refusing to prepend"
-        }
-        inverse.addInstructions(
+        // --- 1. Cover-art tint: night-only removal in PlayerFragment.L0. ---
+        // Day (uiMode != night) jumps over the stub to the stock tint path
+        // (cond_0 block + g9/i.s range-invoke intact); night falls into the
+        // stub, which clears the cell and returns. v0-v1 are dead at entry
+        // (.locals 6); p0 is preserved. NOTE: if-nez jumps when NONZERO,
+        // if-eqz jumps when ZERO — the null guard below must use if-eqz.
+        PlayerCoverTintFingerprint.method.addInstructions(
             0,
             """
-                iget-object v0, p0, Lcom/anghami/model/adapter/base/BaseViewHolder;->itemView:Landroid/view/View;
+                iget-object v0, p0, Lcom/anghami/player/ui/d;->e:Landroid/view/View;
                 invoke-virtual {v0}, Landroid/view/View;->getContext()Landroid/content/Context;
                 move-result-object v0
                 invoke-virtual {v0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
@@ -124,35 +125,52 @@ val playerPatch = bytecodePatch(
                 iget v0, v0, Landroid/content/res/Configuration;->uiMode:I
                 and-int/lit8 v0, v0, 0x30
                 const/16 v1, 0x20
-                if-eq v0, v1, :player_keep_inverse
+                if-ne v0, v1, :player_day_stock
+                iget-object v0, p0, Lcom/anghami/player/ui/l;->n:Lvd/b;
+                if-eqz v0, :player_night_clear
+                invoke-interface {v0}, Lvd/b;->dispose()V
+                :player_night_clear
+                const/4 v0, 0x0
+                iput-object v0, p0, Lcom/anghami/player/ui/l;->n:Lvd/b;
                 return-void
-                :player_keep_inverse
+                :player_day_stock
             """,
         )
 
-        // RowModel._bind has .locals 6, so v0 is dead at entry. Night
-        // (xor == 0) skips the write; day forces the flag false.
-        RowModelBindFingerprint.method.addInstructions(
+        // --- 2. Queue rows: stock in both modes (no hooks). ---
+        // Both backgrounds are dark again (day tint, night theme), so the
+        // stock white inverse rows read correctly everywhere.
+
+        // --- 3. Accent now-playing + pills (night-gated const swaps). ---
+        // m0 (.locals 7): v0-v2 dead at entry. isDay via branch-free
+        // arithmetic (1 day, 0 night); IDs picked as NIGHT + isDay * DIFF.
+        QueuePillColorsFingerprint.method.addInstructions(
             0,
             """
-                invoke-virtual {p0}, Lcom/anghami/model/adapter/base/ConfigurableModelWithHolder;->getContext()Landroid/content/Context;
-                move-result-object v0
-                invoke-virtual {v0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+                invoke-virtual {p0}, Landroidx/fragment/app/Fragment;->getResources()Landroid/content/res/Resources;
                 move-result-object v0
                 invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()Landroid/content/res/Configuration;
                 move-result-object v0
                 iget v0, v0, Landroid/content/res/Configuration;->uiMode:I
                 and-int/lit8 v0, v0, 0x30
-                xor-int/lit8 v0, v0, 0x20
-                if-eqz v0, :pq_bind_day_done
-                const/4 v0, 0x0
-                iput-boolean v0, p0, Lcom/anghami/model/adapter/base/ConfigurableModelWithHolder;->isInverseColors:Z
-                :pq_bind_day_done
+                xor-int/lit8 v1, v0, 0x20
+                neg-int v0, v1
+                or-int v0, v0, v1
+                ushr-int/lit8 v0, v0, 0x1f
+                const v1, 0x7f060598
+                const v2, -0x39a
+                mul-int v2, v0, v2
+                add-int v1, v1, v2
+                sput v1, Lcom/anghami/player/ui/l;->playerNightText:I
+                const v1, 0x7f060679
+                const v2, -0x633
+                mul-int v2, v0, v2
+                add-int v1, v1, v2
+                sput v1, Lcom/anghami/player/ui/l;->playerNightBg:I
             """,
         )
-
-        // --- 3. Accent now-playing + pills (const swaps, no branches). ---
-        // Pills: white -> primaryText (text + icon tint), grey wash -> theme bg.
+        // Pills: white -> nightText (primaryText at night, white in day),
+        // grey wash -> nightBg (theme bg at night, black_20 in day).
         val m0 = QueuePillColorsFingerprint.method
         val m0Insns = m0.implementation!!.instructions
         val whiteConsts = m0Insns.mapIndexedNotNull { index, ins ->
@@ -167,8 +185,11 @@ val playerPatch = bytecodePatch(
         check(whiteConsts.size == 1) {
             "expected exactly 1 white const in playerfeed/c.m0, found ${whiteConsts.size}"
         }
-        m0.replaceInstructions(whiteConsts[0], "const v1, 0x7f060598")
-        val pillBgConsts = m0Insns.mapIndexedNotNull { index, ins ->
+        m0.replaceInstructions(
+            whiteConsts[0],
+            "sget v1, $NIGHT_GATE_HOLDER->$NIGHT_TEXT_FIELD:I",
+        )
+        val pillBgConsts = m0.implementation!!.instructions.mapIndexedNotNull { index, ins ->
             if (ins.opcode == Opcode.CONST &&
                 (ins as? Instruction31i)?.narrowLiteral == 0x7f060046
             ) {
@@ -180,9 +201,43 @@ val playerPatch = bytecodePatch(
         check(pillBgConsts.size == 1) {
             "expected exactly 1 black_20 const in playerfeed/c.m0, found ${pillBgConsts.size}"
         }
-        m0.replaceInstructions(pillBgConsts[0], "const v0, 0x7f060679")
+        m0.replaceInstructions(
+            pillBgConsts[0],
+            "sget v0, $NIGHT_GATE_HOLDER->$NIGHT_BG_FIELD:I",
+        )
 
-        // Now-playing: dark_3 -> app_color.
+        // Now-playing (.locals 3): v0-v2 dead at entry. Same label-free
+        // gate; the wash cell holds the resolved color int (stock wash in
+        // day, transparent at night), so the getColor-stripping below stays
+        // valid in both modes.
+        SongHighlightFingerprint.method.addInstructions(
+            0,
+            """
+                invoke-virtual {p0}, Lcom/anghami/model/adapter/base/ConfigurableModelWithHolder;->getContext()Landroid/content/Context;
+                move-result-object v0
+                invoke-virtual {v0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+                move-result-object v0
+                invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()Landroid/content/res/Configuration;
+                move-result-object v0
+                iget v0, v0, Landroid/content/res/Configuration;->uiMode:I
+                and-int/lit8 v0, v0, 0x30
+                xor-int/lit8 v1, v0, 0x20
+                neg-int v0, v1
+                or-int v0, v0, v1
+                ushr-int/lit8 v0, v0, 0x1f
+                const v1, 0x7f06002f
+                const v2, 0xe8
+                mul-int v2, v0, v2
+                add-int v1, v1, v2
+                sput v1, Lcom/anghami/player/ui/l;->playerNightHl:I
+                const v1, 0x7f06060b
+                invoke-direct {p0, v1}, Lcom/anghami/model/adapter/SongRowModel;->getColor(I)I
+                move-result v1
+                mul-int v1, v1, v0
+                sput v1, Lcom/anghami/player/ui/l;->playerNightWash:I
+            """,
+        )
+        // Now-playing: dark_3 -> nightHl (app_color at night, dark_3 day).
         val hl = SongHighlightFingerprint.method
         val hlInsns = hl.implementation!!.instructions
         val darkConsts = hlInsns.mapIndexedNotNull { index, ins ->
@@ -197,11 +252,35 @@ val playerPatch = bytecodePatch(
         check(darkConsts.size == 1) {
             "expected exactly 1 dark_3 const in setSongHighlight, found ${darkConsts.size}"
         }
-        hl.replaceInstructions(darkConsts[0], "const v1, 0x7f06002f")
+        hl.replaceInstructions(
+            darkConsts[0],
+            "sget v1, $NIGHT_GATE_HOLDER->$NIGHT_HL_FIELD:I",
+        )
 
-        // Unselected rows: app_color -> primaryText (title + drag/delete
-        // icons share one const via move v1,v2). Inverse (night) keeps white,
-        // subtitle keeps secondaryText, equalizer keeps its app_color bar.
+        // Unselected rows (.locals 4): v0-v2 dead at entry. app_color ->
+        // nightRm (primaryText at night, app_color in day).
+        RemoveHighlightFingerprint.method.addInstructions(
+            0,
+            """
+                invoke-virtual {p0}, Lcom/anghami/model/adapter/base/ConfigurableModelWithHolder;->getContext()Landroid/content/Context;
+                move-result-object v0
+                invoke-virtual {v0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+                move-result-object v0
+                invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()Landroid/content/res/Configuration;
+                move-result-object v0
+                iget v0, v0, Landroid/content/res/Configuration;->uiMode:I
+                and-int/lit8 v0, v0, 0x30
+                xor-int/lit8 v1, v0, 0x20
+                neg-int v0, v1
+                or-int v0, v0, v1
+                ushr-int/lit8 v0, v0, 0x1f
+                const v1, 0x7f060598
+                const v2, -0x569
+                mul-int v2, v0, v2
+                add-int v1, v1, v2
+                sput v1, Lcom/anghami/player/ui/l;->playerNightRm:I
+            """,
+        )
         val rm = RemoveHighlightFingerprint.method
         val rmInsns = rm.implementation!!.instructions
         val appConsts = rmInsns.mapIndexedNotNull { index, ins ->
@@ -216,12 +295,16 @@ val playerPatch = bytecodePatch(
         check(appConsts.size == 1) {
             "expected exactly 1 app_color const in removeSongHighlight, found ${appConsts.size}"
         }
-        rm.replaceInstructions(appConsts[0], "const v2, 0x7f060598")
+        rm.replaceInstructions(
+            appConsts[0],
+            "sget v2, $NIGHT_GATE_HOLDER->$NIGHT_RM_FIELD:I",
+        )
 
         // Equalizer: nothing to do. `setBarColor(I)` resolves the id
         // itself via `ContextCompat.getColor` (proven by the
-        // `NotFoundException` a resolved color caused), so the const swap
-        // above already gives it accent bars. Just assert the call site.
+        // `NotFoundException` a resolved color caused), so the gated swap
+        // above already gives it accent bars at night and stock bars in
+        // day. Just assert the call site.
         val barCalls = hlInsns.mapIndexedNotNull { index, ins ->
             val ref = (ins as? ReferenceInstruction)?.reference as? MethodReference
             if (ref?.definingClass == "Lcom/anghami/ui/view/EqualizerView;" &&
@@ -236,9 +319,13 @@ val playerPatch = bytecodePatch(
             "expected exactly 1 EqualizerView.setBarColor in setSongHighlight, found ${barCalls.size}"
         }
 
-        // Highlight wash: song_row_highlight_color -> transparent.
+        // Highlight wash: song_row_highlight_color -> nightWash int.
         // Sequence: const v1, <wash>; getColor; move-result v1;
-        // setBackgroundColor. Zero the const and drop the resolve.
+        // setBackgroundColor. Zero the resolve in both modes (the cell
+        // already holds the right int) and load the cell instead. The
+        // entry prepend above contains its own wash-id const for the day
+        // resolve, so the scan requires the stock setBackgroundColor tail
+        // (INVOKE_VIRTUAL) to pick the stock site.
         val washConsts = hl.implementation!!.instructions.mapIndexedNotNull { index, ins ->
             if (ins.opcode == Opcode.CONST &&
                 (ins as? Instruction31i)?.narrowLiteral == 0x7f06060b
@@ -248,10 +335,14 @@ val playerPatch = bytecodePatch(
                 null
             }
         }
-        check(washConsts.size == 1) {
-            "expected exactly 1 highlight-wash const in setSongHighlight, found ${washConsts.size}"
+        val washStock = washConsts.filter { index ->
+            val insns = hl.implementation!!.instructions
+            index + 3 < insns.size && insns[index + 3].opcode == Opcode.INVOKE_VIRTUAL
         }
-        val washIndex = washConsts[0]
+        check(washStock.size == 1) {
+            "expected exactly 1 stock highlight-wash const in setSongHighlight, found ${washStock.size} (all wash consts: $washConsts)"
+        }
+        val washIndex = washStock[0]
         val afterWash = hl.implementation!!.instructions
         check(afterWash[washIndex + 1].opcode == Opcode.INVOKE_DIRECT &&
             afterWash[washIndex + 2].opcode == Opcode.MOVE_RESULT) {
@@ -260,12 +351,15 @@ val playerPatch = bytecodePatch(
         }
         hl.removeInstruction(washIndex + 2)
         hl.removeInstruction(washIndex + 1)
-        hl.replaceInstructions(washIndex, "const v1, 0x0")
+        hl.replaceInstructions(
+            washIndex,
+            "sget v1, $NIGHT_GATE_HOLDER->$NIGHT_WASH_FIELD:I",
+        )
 
         // --- 4. Action icons (branch-free appends at exits). ---
-        // AnimatedShareView.<init> has .locals 5; v0-v1 are dead at the
-        // end. Straight-line, no labels. primaryText id is stable
-        // (res/values/public.xml).
+        // AnimatedShareView.<init> has .locals 5; v0-v2 are dead at the
+        // end. Straight-line, no labels. Day paints resolve to white
+        // (-0x1, the stock hardcoded value); night resolves primaryText.
         val ctor = ShareViewCtorFingerprint.method
         val ctorInsns = ctor.implementation!!.instructions
         check(ctorInsns.last().opcode == Opcode.RETURN_VOID) {
@@ -278,9 +372,22 @@ val playerPatch = bytecodePatch(
                 move-result-object v0
                 invoke-virtual {v0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
                 move-result-object v0
+                move-object v2, v0
+                invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()Landroid/content/res/Configuration;
+                move-result-object v0
+                iget v0, v0, Landroid/content/res/Configuration;->uiMode:I
+                and-int/lit8 v0, v0, 0x30
+                xor-int/lit8 v1, v0, 0x20
+                neg-int v0, v1
+                or-int v0, v0, v1
+                ushr-int/lit8 v0, v0, 0x1f
                 const v1, 0x7f060598
-                invoke-virtual {v0, v1}, Landroid/content/res/Resources;->getColor(I)I
+                invoke-virtual {v2, v1}, Landroid/content/res/Resources;->getColor(I)I
                 move-result v1
+                const v2, -0x1
+                sub-int v2, v2, v1
+                mul-int v2, v2, v0
+                add-int v1, v1, v2
                 iget-object v0, p0, Lcom/anghami/player/ui/AnimatedShareView;->k:Landroid/graphics/Paint;
                 invoke-virtual {v0, v1}, Landroid/graphics/Paint;->setColor(I)V
                 iget-object v0, p0, Lcom/anghami/player/ui/AnimatedShareView;->l:Landroid/graphics/Paint;
@@ -288,21 +395,36 @@ val playerPatch = bytecodePatch(
             """,
         )
 
-        // Lottie re-tint: re-register the accent KeyPath("**") filter after
-        // every animation set on the three player-scoped funnels (see
+        // Lottie re-tint: re-register the KeyPath("**") filter after every
+        // animation set on the three player-scoped funnels (see
         // LottieSetterFingerprint). Branch-free, v0-v3 only (all dead at
-        // each exit). j.c takes the view in p0, i.i/i.j in p1.
+        // each exit, per the proven appends). Night filter is the accent;
+        // day resolves to white (-0x1 literal, no second lookup).
+        // j.c takes the view in p0, i.i/i.j in p1.
         val tintFor = { viewReg: String ->
             """
                 move-object v0, $viewReg
                 iget-object v1, v0, Lcom/airbnb/lottie/LottieAnimationView;->e:LS3/H;
                 invoke-virtual {v0}, Landroid/view/View;->getContext()Landroid/content/Context;
-                move-result-object v2
-                invoke-virtual {v2}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
-                move-result-object v2
+                move-result-object v0
+                invoke-virtual {v0}, Landroid/content/Context;->getResources()Landroid/content/res/Resources;
+                move-result-object v0
+                move-object v2, v0
+                invoke-virtual {v0}, Landroid/content/res/Resources;->getConfiguration()Landroid/content/res/Configuration;
+                move-result-object v0
+                iget v0, v0, Landroid/content/res/Configuration;->uiMode:I
+                and-int/lit8 v0, v0, 0x30
+                xor-int/lit8 v3, v0, 0x20
+                neg-int v0, v3
+                or-int v0, v0, v3
+                ushr-int/lit8 v0, v0, 0x1f
                 const v3, 0x7f06002f
                 invoke-virtual {v2, v3}, Landroid/content/res/Resources;->getColor(I)I
-                move-result v2
+                move-result v3
+                const v2, -0x1
+                sub-int v2, v2, v3
+                mul-int v2, v2, v0
+                add-int v2, v3, v2
                 sget-object v3, Landroid/graphics/PorterDuff${'$'}Mode;->SRC_ATOP:Landroid/graphics/PorterDuff${'$'}Mode;
                 new-instance v0, LS3/V;
                 invoke-direct {v0, v2, v3}, Landroid/graphics/PorterDuffColorFilter;-><init>(ILandroid/graphics/PorterDuff${'$'}Mode;)V
