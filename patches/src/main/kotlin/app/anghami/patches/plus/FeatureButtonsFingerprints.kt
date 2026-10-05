@@ -71,3 +71,33 @@ object MixAIButtonPlaylistFingerprint : Fingerprint(
         ),
     )
 )
+
+object KaraokeShowFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/ghost/local/Account;",
+    name = "isShowKaraoke",
+    // NOTE: no accessFlags; class + name + signature pin it. Trivial getter
+    // on the server `showKaraoke` flag; feeds B5/f setupKaraokeVolumeBar
+    // (lyrics-view karaoke bar/button visibility).
+    returnType = "Z",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/ghost/local/Account;->showKaraoke:Z"
+        ),
+    )
+)
+
+object KaraokeCanUseFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/ghost/local/Account;",
+    name = "isCanUseKaraoke",
+    // NOTE: no accessFlags; class + name + signature pin it. Trivial getter
+    // on the server `canUseKaraoke` flag; the karaoke FEATURE gate in B5/f
+    // (distinct from the upsell-button flag above).
+    returnType = "Z",
+    parameters = listOf(),
+    filters = listOf(
+        fieldAccess(
+            smali = "Lcom/anghami/ghost/local/Account;->canUseKaraoke:Z"
+        ),
+    )
+)

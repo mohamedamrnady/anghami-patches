@@ -53,7 +53,9 @@ object LyricsSuccessFingerprint : Fingerprint(
  * `PlayerFragment.W0(Song)`: the per-song lyrics-button gate. Renders the
  * button enabled (alpha 1.0) only when `Song.hasLyrics` is true and automix
  * is off; otherwise alpha 0.3 + `setEnabled(false)` on the button and its
- * container. No accessFlags (class + name + signature + content pin it).
+ * container. Anchor for the hasLyrics force-insert at entry — the native
+ * branch then enables the button itself. No accessFlags (class + name +
+ * signature + content pin it).
  */
 object LyricsButtonGateFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/l;",
@@ -87,10 +89,11 @@ object LyricsApiOnErrorFingerprint : Fingerprint(
 )
 
 /**
- * `PlayerFragment.a1(mode, ...)`: the player-mode observer. When lyrics mode
- * is requested but `!Song.hasLyrics` (or podcast), it forces the mode back
- * to Normal — so the tap fires yet the screen never shows. The podcast guard
- * stays; only the `hasLyrics` revert is nopped (same approved technique).
+ * `PlayerFragment.a1(mode, ...)`: the player-mode observer. Reads the
+ * current song via `I0()` and reverts lyrics mode when `!Song.hasLyrics`
+ * (podcasts always revert). Anchor for the hasLyrics force-insert right
+ * after the `I0()` move-result — the podcast guard is untouched and no
+ * branches are nopped.
  */
 object LyricsModeRevertFingerprint : Fingerprint(
     definingClass = "Lcom/anghami/player/ui/l;",
@@ -107,6 +110,30 @@ object LyricsModeRevertFingerprint : Fingerprint(
         methodCall(
             definingClass = "Lcom/anghami/player/ui/PlayerFragmentViewModel;",
             name = "getLastBoundSongId",
+        ),
+    )
+)
+
+/**
+ * `PlayerFragment.l$c.onLongClick(View)`: the play/pause button's native
+ * long-press — shows the sleep-timer bottom sheet (`L6/b.h0`, the
+ * TimerBottomSheetDialogFragment). The lyrics-options patch early-returns
+ * here with our dialog instead. No accessFlags (class + name + signature +
+ * content pin it).
+ */
+object PlayPauseLongPressFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/player/ui/l\$c;",
+    name = "onLongClick",
+    returnType = "Z",
+    parameters = listOf("Landroid/view/View;"),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/player/ui/l;",
+            name = "N0",
+        ),
+        methodCall(
+            definingClass = "LL6/b;",
+            name = "h0",
         ),
     )
 )

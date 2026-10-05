@@ -35,13 +35,13 @@ import java.util.regex.Pattern;
 /**
  * LRCLIB fallback for truncated lyrics (opt-in patch runtime).
  *
- * Entry points called from trampolines injected into
- * {@code LA7/F;->onNext} (the GETlyrics.view API callback):
- * - {@link #maybeFetch} renders full LRCLIB lyrics when the server
- *   response is truncated or empty. Full native responses return early,
- *   so the Plus/native path is untouched.
- * - {@link #armLongPress} attaches the per-song options dialog to the
- *   lyrics view (long-press).
+ * Entry points called from injected trampolines:
+ * - {@link #maybeFetch} (from {@code A7/F.onNext}, after the server teaser
+ *   renders) renders full LRCLIB lyrics when the server response is
+ *   truncated or empty. Full native responses return early, so the
+ *   Plus/native path is untouched.
+ * - {@link #showLyricsOptions} (from the play/pause long-press) opens the
+ *   options dialog for the current song.
  *
  * All app classes are touched via reflection: the extension compiles
  * without the app on the classpath. Any failure is caught and logged;
@@ -76,8 +76,7 @@ public final class LrclibFallback {
     private static String lastPlain;
     private static String lastSynced;
     private static boolean lastPreferSynced = true;
-    private static final java.util.WeakHashMap<View, Object> viewSongs =
-            new java.util.WeakHashMap<View, Object>();
+    private static long lastDialogMs;
     private static final java.util.WeakHashMap<Object, String> renderedKeys =
             new java.util.WeakHashMap<Object, String>();
 
@@ -91,6 +90,37 @@ public final class LrclibFallback {
     /** Called from the API error path (song has nothing usable on the server). */
     public static void maybeFetchNoResponse(Object songObj, Object callbackObj) {
         impl(songObj, null, callbackObj);
+    }
+
+    /**
+     * Forces per-song flags at the data level (not a consumer workaround).
+     * The server song payload carries {@code hasLyrics=false} for
+     * lyrics-less songs, and {@code A7/C} actively re-clears it on empty
+     * lyrics responses — so nopping each reader (button gate, mode
+     * observer, ...) was whack-a-mole. Setting the flag at every trampoline
+     * (W0, onNext, onError, mode observer) makes all native checks see
+     * lyrics available; the fallback itself still only renders when the
+     * server response is truncated/empty. {@code hasKaraoke} is forced
+     * false the same way (song-level kill-switch; GSON sets the field
+     * directly so there is no method to hook — same treatment as lyrics).
+     * Null-safe, reflection-only, never crashes the host.
+     */
+    public static void forceSongFlags(Object songObj) {
+        try {
+            if (songObj == null) return;
+            Field f = fieldUp(songObj.getClass(), "hasLyrics");
+            if (f != null && f.getType() == Boolean.TYPE && !f.getBoolean(songObj)) {
+                f.setBoolean(songObj, true);
+                Log.d(TAG, "hasLyrics forced true");
+            }
+            Field k = fieldUp(songObj.getClass(), "hasKaraoke");
+            if (k != null && k.getType() == Boolean.TYPE && k.getBoolean(songObj)) {
+                k.setBoolean(songObj, false);
+                Log.d(TAG, "hasKaraoke forced false");
+            }
+        } catch (Throwable t) {
+            Log.d(TAG, "forceSongFlags failed: " + t);
+        }
     }
 
     private static void impl(Object songObj, Object responseObj, Object callbackObj) {
@@ -173,37 +203,33 @@ public final class LrclibFallback {
         }
     }
 
-    /** Attaches the long-press options dialog to the given view (lyrics view or player button). */
-    public static void armLongPress(Object viewObj, Object songObj) {
+    /** Play/pause long-press entry: replaces the native sleep-timer sheet
+     * (see the long-press patch) with the lyrics options for the current
+     * song. Runs on the main thread (long-click dispatch). Never crashes
+     * the host; toasts when nothing is loaded yet.
+     */
+    public static void showLyricsOptions(Object fragmentObj) {
         try {
-            if (!(viewObj instanceof View)) return;
-            final View view = (View) viewObj;
-            synchronized (LrclibFallback.class) {
-                if (songObj != null) viewSongs.put(view, songObj);
+            if (fragmentObj == null) return;
+            Context ctx = null;
+            try {
+                Method m = fragmentObj.getClass().getMethod("getActivity");
+                Object a = m.invoke(fragmentObj);
+                if (a instanceof Context) ctx = (Context) a;
+            } catch (Exception ignored) {
             }
-            // onNext / W0 may run off the main thread; view ops must hop to it.
-            new Handler(Looper.getMainLooper()).post(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        view.setOnLongClickListener(new View.OnLongClickListener() {
-                            @Override
-                            public boolean onLongClick(View v) {
-                                try {
-                                    showOptions(v.getContext(), v);
-                                } catch (Throwable t) {
-                                    Log.d(TAG, "options dialog failed: " + t);
-                                }
-                                return true;
-                            }
-                        });
-                    } catch (Throwable t) {
-                        Log.d(TAG, "armLongPress failed: " + t);
-                    }
-                }
-            });
+            if (ctx == null) return;
+            final Object song;
+            synchronized (LrclibFallback.class) {
+                song = lastSong;
+            }
+            if (song == null) {
+                Toast.makeText(ctx, "No lyrics loaded yet", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            showOptionsForSong(ctx, song);
         } catch (Throwable t) {
-            Log.d(TAG, "armLongPress failed: " + t);
+            Log.d(TAG, "showLyricsOptions failed: " + t);
         }
     }
 
@@ -747,9 +773,6 @@ public final class LrclibFallback {
                     if (response == null) return;
                     List<Object> lines = buildLines(response, plain, synced);
                     invokeRender(callbackObj, songObj, lines, response);
-                    if (toast) {
-                        Toast.makeText(ctx, "Full lyrics via LRCLIB", Toast.LENGTH_SHORT).show();
-                    }
                     Log.d(TAG, "fallback applied (" + queryUsed + ")");
                 } catch (Throwable t) {
                     Log.d(TAG, "render failed: " + t);
@@ -854,12 +877,12 @@ public final class LrclibFallback {
 
     // ================= options dialog =================
 
-    private static void showOptions(Context ctx, View anchor) {
-        final Object mapped;
+    /** Options dialog for an already-resolved song (play-button entry). */
+    private static void showOptionsForSong(Context ctx, Object song) {
         synchronized (LrclibFallback.class) {
-            mapped = viewSongs.get(anchor);
+            if (System.currentTimeMillis() - lastDialogMs < 2000) return;
+            lastDialogMs = System.currentTimeMillis();
         }
-        final Object song;
         final Object callback;
         final Object original;
         final String query;
@@ -867,7 +890,6 @@ public final class LrclibFallback {
         final String plain;
         final String synced;
         synchronized (LrclibFallback.class) {
-            song = mapped != null ? mapped : lastSong;
             callback = lastCallback;
             original = lastOriginalResponse;
             query = lastQueryUsed;
@@ -884,6 +906,19 @@ public final class LrclibFallback {
             info = readSong(song);
         } catch (Exception e) {
             return;
+        }
+        // Freshness: the last-render globals (source/query/plain/synced/
+        // original) may belong to a different (pre-cached/next) song than
+        // the long-pressed one. The artist/title fields are always filled
+        // from the mapped song; the synced/plain toggle and server-version
+        // restore are only offered when the globals match this song.
+        boolean fresh = false;
+        try {
+            Object mappedId = getFieldUp(song, "id");
+            Object lastId = lastSong == null ? null : getFieldUp(lastSong, "id");
+            fresh = mappedId != null && mappedId.equals(lastId)
+                    && callback == lastCallback;
+        } catch (Exception ignored) {
         }
 
         LinearLayout layout = new LinearLayout(ctx);
@@ -907,15 +942,15 @@ public final class LrclibFallback {
 
         AlertDialog.Builder b = new AlertDialog.Builder(ctx);
         b.setTitle("Lyrics source");
-        String head = (source.isEmpty() ? "Server teaser" : "Full lyrics via LRCLIB (" + source + ")")
-                + (query.isEmpty() ? "" : "\n" + query);
-        b.setMessage(head);
         b.setView(layout);
         b.setPositiveButton("Retry", null); // overridden below to avoid auto-dismiss.
-        if (plain != null && synced != null && !plain.isEmpty() && !synced.isEmpty()) {
+        if (fresh && plain != null && synced != null
+                && !plain.isEmpty() && !synced.isEmpty()) {
             b.setNeutralButton(lastPreferSynced ? "Show plain" : "Show synced", null);
         }
-        b.setNegativeButton("Server version", null);
+        if (fresh) {
+            b.setNegativeButton("Server version", null);
+        }
         final AlertDialog dialog = b.create();
         dialog.show();
         searchBtn.setOnClickListener(new View.OnClickListener() {
