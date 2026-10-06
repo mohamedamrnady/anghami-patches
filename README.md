@@ -22,9 +22,9 @@ All patches are enabled by default (`default=true`) — disable any you don't ne
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.3.0-dev.3](https://github.com/mohamedamrnady/anghami-patches/releases/tag/v1.3.0-dev.3)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;17 patches total
+> **[v1.0.0](https://github.com/mohamedamrnady/anghami-patches/releases/tag/v1.0.0)**&nbsp;&nbsp;•&nbsp;&nbsp;`main`&nbsp;&nbsp;•&nbsp;&nbsp;18 patches total
 <details open>
-<summary>📦 Anghami&nbsp;&nbsp;•&nbsp;&nbsp;17 patches</summary>
+<summary>📦 Anghami&nbsp;&nbsp;•&nbsp;&nbsp;18 patches</summary>
 <br>
 
 **🎯 Supported versions:**
@@ -34,6 +34,7 @@ All patches are enabled by default (`default=true`) — disable any you don't ne
 
 | 💊&nbsp;Patch | 📜&nbsp;Description | ⚙️&nbsp;Options |
 |----------|----------------|-----------|
+| [AMOLED black background](#amoled-black-background) | Forces pure-black app background in dark mode (window_background_color -> #000000). Surfaces/cards keep stock greys; light mode untouched. |  |
 | [Disable audio ads](#disable-audio-ads) | Forces AdSettings.noAd=true and PlayQueue.getDisableAds=true so songs are treated as ad-free locally. Client flag only. |  |
 | [Header Play + Shuffle](#header-play-shuffle) | Playlist/album headers show Play + Shuffle instead of Shuffle + Edit/Follow/Like (functional LEAVECOLLAB, local-songs ADD_MORE and podcasts untouched). Pulls in 'Unforce shuffle'. |  |
 | [Hide Gold features](#hide-gold-features) | Forces Account.isGold/isGoldUser and all GoldUtilsKt.isGold overloads to false. Hides server-gated Gold UI instead of spoofing it. |  |
@@ -47,7 +48,7 @@ All patches are enabled by default (`default=true`) — disable any you don't ne
 | [Player theme background](#player-theme-background) | Makes the player background, text, icons and seekbar follow the app's day/night theme. Keeps the darker split below the progress bar. Pair with 'Player theme'. |  |
 | [Remove popup promos](#remove-popup-promos) | No-ops the in-house popup funnel, the fullscreen startup dialog, and the flyer ad callback. Google SDK ads untouched. |  |
 | [Spoof stock app signature](#spoof-stock-app-signature) | Forces SignatureUtils.getAppSignature to hash with the stock cert prefix (he9B...kw=), so X-ANGH-APP-RGSIG matches a stock install. Salt/body hashing unchanged. |  |
-| [Unforce shuffle](#unforce-shuffle) | Forces server shuffleOn=false at both sync points, disables the pick-a-song radio redirect, enables shuffle buttons, and disarms the shuffle upsell dialog. Manual shuffle toggle and the header Shuffle button keep working. |  |
+| [Unforce shuffle](#unforce-shuffle) | Forces server shuffleOn=false at both sync points, never reports shuffle to the server, disables the pick-a-song radio redirect, enables shuffle buttons, and disarms the shuffle upsell dialog. Manual shuffle toggle and the header Shuffle button keep working. |  |
 | [Unlock downloads](#unlock-downloads) | No-ops download limit asserts, forces limited-plan=false and large offline caps (999999). Local gates only; the server still authorizes files. |  |
 | [Unlock local Plus](#unlock-local-plus) | Forces Account.isPlus/isPlusUser=true, enablePlayerRestrictions=false, canPlayOfflineAndFree=true. Local UI/gating only; server premium checks remain. |  |
 | [Unlock playback limits](#unlock-playback-limits) | Disables skip and queue limits (skipLimitReached/queueRestrictionsEnabled=false, disable-flags=true). Local gates only. |  |
