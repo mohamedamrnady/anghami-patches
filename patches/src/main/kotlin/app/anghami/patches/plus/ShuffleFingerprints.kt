@@ -85,6 +85,37 @@ object SocketPayloadShuffleFingerprint : Fingerprint(
 )
 
 /**
+ * Client -> server report writer (Anghami 8.0.28, verified in Anghami 8.0.28
+ * PlayQueue:6722, sole definition).
+ *
+ * `fillSyncData(ServerPlayQueue)` builds every client->server payload
+ * (`_putQueue` diff-PUTs, `reportSetPlayQueue` POSTs, and the
+ * `updateFromSocketPayload` Diff baseline): `if isShuffleMode():
+ * shuffleOn=true + shuffledSongs=copy(shuffledSongs)`. Nopping those two
+ * iputs keeps the server from ever learning the session is shuffled —
+ * which is what made it answer with radio/restricted content and enforce
+ * skip limits despite the local unlocks (the 1.2.0 no-op had the same
+ * server-visible behavior by never letting shuffle turn on at all).
+ * Local `isShuffleMode`/`shuffledSongs` stay live, and both Diff sides are
+ * built by this same method, so no phantom diffs.
+ */
+object SyncReportFingerprint : Fingerprint(
+    definingClass = "Lcom/anghami/odin/playqueue/PlayQueue;",
+    name = "fillSyncData",
+    accessFlags = listOf(AccessFlags.PUBLIC),
+    returnType = "V",
+    parameters = listOf(
+        "Lcom/anghami/odin/playqueue/ServerPlayQueue;",
+    ),
+    filters = listOf(
+        methodCall(
+            definingClass = "Lcom/anghami/odin/playqueue/PlayQueue;",
+            name = "getOrderedSongs",
+        ),
+    )
+)
+
+/**
  * Pick-a-song -> radio-queue redirect (Anghami 8.0.28, verified in Anghami 8.0.28
  * list_fragment/c:1762, sole definition, private).
  *
