@@ -1,3 +1,13 @@
+## [1.3.0-dev.4](https://github.com/mohamedamrnady/anghami-patches/compare/v1.3.0-dev.3...v1.3.0-dev.4) (2026-10-06)
+
+### 🐛 Bug Fixes
+
+* stop server radio paths, never report shuffle ([f281e30](https://github.com/mohamedamrnady/anghami-patches/commit/f281e308c4a24aa6cc812266cf90951de26927af))
+
+### ✨ New Features
+
+* AMOLED black background in dark mode ([0280373](https://github.com/mohamedamrnady/anghami-patches/commit/0280373d3f295bab57585b584b4834dae3d43bb9))
+
 ## [1.3.0-dev.3](https://github.com/mohamedamrnady/anghami-patches/compare/v1.3.0-dev.2...v1.3.0-dev.3) (2026-10-05)
 
 ### 🐛 Bug Fixes
