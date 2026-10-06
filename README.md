@@ -83,6 +83,12 @@ streaming service can violate its Terms of Service — use a throwaway account,
 expect server-gated features (full lyrics, high-quality streams, downloads) to
 keep failing, and do not redistribute patched APKs as "Premium Unlocked".
 
+## AI Disclousre and Contribution
+
+The code in this repo is written using Frontier LLMs, planned and stress-tested by a human. Feel free to report bugs, request features and open pull requests within the acceptable scope of Morphe and ToS of Anghami.
+
 ## 📜 License
 
 Anghami patches by Nady are licensed under the [GNU General Public License v3.0](LICENSE)
+
+anghami-patches is an independent project and is not affiliated with Anghami. Anghami is a trademark of Anghami Inc.
