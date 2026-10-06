@@ -1,3 +1,23 @@
+## [1.3.0](https://github.com/mohamedamrnady/anghami-patches/compare/v1.2.0...v1.3.0) (2026-10-06)
+
+### 🐛 Bug Fixes
+
+* kill tap/skip radio paths, keep Shuffle working ([ae6fccb](https://github.com/mohamedamrnady/anghami-patches/commit/ae6fccbecf77489909d0646ece142f7f413b3aa5))
+* restore v1 unforce-shuffle scope, keep header Shuffle working ([b501028](https://github.com/mohamedamrnady/anghami-patches/commit/b501028d11d7a4e798dd9adf754d7ad0c7e1a466))
+* stop server radio paths, never report shuffle ([2e90fb2](https://github.com/mohamedamrnady/anghami-patches/commit/2e90fb209b13d038cee88ab6e19ab163449ad271))
+* tap-a-song skip — socket pinned false, creation appliers removed ([99edf39](https://github.com/mohamedamrnady/anghami-patches/commit/99edf39a67164ea2dd7f9f7e8ef87a6ac14fc6c3))
+
+### ✨ New Features
+
+* AMOLED black background in dark mode ([4c59ce4](https://github.com/mohamedamrnady/anghami-patches/commit/4c59ce4336b5b818d0a1994798fd25f0005f0fa3))
+* force song flags, play-button lyrics options, karaoke off ([5b066e8](https://github.com/mohamedamrnady/anghami-patches/commit/5b066e8773608e8802031f09b45aad479d0d7234))
+* localize fallback texts, current-song dialog, teaser guide ([9bd7442](https://github.com/mohamedamrnady/anghami-patches/commit/9bd744203f2b0add22270229f7601298ce687b5f))
+* LRCLIB lyrics fallback with long-press options ([67429ff](https://github.com/mohamedamrnady/anghami-patches/commit/67429ffafd3c8f751e5650a305a5cd433ded877e))
+* night-only player theme, stock tinted player in day mode ([a7f483c](https://github.com/mohamedamrnady/anghami-patches/commit/a7f483c674e514d92168b601b7a61e8331237186))
+* prioritize cached LRCLIB over truncated server lyrics ([7136038](https://github.com/mohamedamrnady/anghami-patches/commit/713603842e5ea1c22992df35bdac0954fa772e26))
+* sticky shuffle + explicit header Play/Shuffle buttons ([21754c8](https://github.com/mohamedamrnady/anghami-patches/commit/21754c8aa0b95235cc660b2763f78434ae1c00a1))
+* suppress truncated teasers once LRCLIB is cached ([14af3f8](https://github.com/mohamedamrnady/anghami-patches/commit/14af3f843b791f6d2c8bd8f72d8e8dc89c45a4bd))
+
 ## 1.0.0 (2026-10-06)
 
 ### 🐛 Bug Fixes
