@@ -22,7 +22,7 @@ All patches are enabled by default (`default=true`) — disable any you don't ne
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.3.0-dev.4](https://github.com/mohamedamrnady/anghami-patches/releases/tag/v1.3.0-dev.4)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;18 patches total
+> **[v1.3.0-dev.1](https://github.com/mohamedamrnady/anghami-patches/releases/tag/v1.3.0-dev.1)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;18 patches total
 <details open>
 <summary>📦 Anghami&nbsp;&nbsp;•&nbsp;&nbsp;18 patches</summary>
 <br>
